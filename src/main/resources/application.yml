@@ -1,6 +1,10 @@
 spring:
   application:
+    admin:
+      enabled: false
     name: attendance-access-control-api
+  jmx:
+    enabled: false
 
   profiles:
     active: dev
@@ -51,9 +55,17 @@ management:
     web:
       exposure:
         include: health,info,metrics
+    jmx:
+      exposure:
+        exclude: '*'
   endpoint:
     health:
-      show-details: when-authorized
+      show-details: always
+  jmx:
+    metrics:
+      export:
+        enabled: false
+
 
 firebase:
   database-url: https://sistema-asistencia-iot-default-rtdb.firebaseio.com/

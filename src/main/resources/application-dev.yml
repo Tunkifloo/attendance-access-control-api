@@ -3,9 +3,23 @@ spring:
     hibernate:
       ddl-auto: update
     show-sql: true
+  jmx:
+    enabled: false
+
+management:
+  endpoints:
+    jmx:
+      exposure:
+        exclude: '*'
+  jmx:
+    metrics:
+      export:
+        enabled: false
 
 logging:
   level:
     root: DEBUG
     com.iot.attendance: DEBUG
     com.google.firebase: DEBUG
+    sun.rmi: OFF
+    javax.management.remote.rmi: OFF
