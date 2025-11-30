@@ -8,7 +8,6 @@ import com.iot.attendance.application.mapper.WorkerMapper;
 import com.iot.attendance.application.service.WorkerService;
 import com.iot.attendance.domain.enums.WorkerStatus;
 import com.iot.attendance.domain.model.Worker;
-import com.iot.attendance.domain.valueobjects.FingerprintId;
 import com.iot.attendance.domain.valueobjects.RfidTag;
 import com.iot.attendance.infrastructure.exception.ResourceAlreadyExistsException;
 import com.iot.attendance.infrastructure.exception.ResourceNotFoundException;

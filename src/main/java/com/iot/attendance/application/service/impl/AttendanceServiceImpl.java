@@ -5,10 +5,6 @@ import com.iot.attendance.application.dto.response.AttendanceResponse;
 import com.iot.attendance.application.mapper.AttendanceMapper;
 import com.iot.attendance.application.service.AttendanceService;
 import com.iot.attendance.domain.enums.AttendanceStatus;
-import com.iot.attendance.domain.model.Attendance;
-import com.iot.attendance.domain.model.SystemConfiguration;
-import com.iot.attendance.domain.model.Worker;
-import com.iot.attendance.domain.valueobjects.RfidTag;
 import com.iot.attendance.infrastructure.exception.BusinessException;
 import com.iot.attendance.infrastructure.exception.ResourceNotFoundException;
 import com.iot.attendance.infrastructure.firebase.FirebaseRealtimeService;
@@ -26,7 +22,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.stream.Collectors;
 
