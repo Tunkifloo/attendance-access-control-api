@@ -14,7 +14,7 @@ import java.net.UnknownHostException;
 @Slf4j
 public class AttendanceAccessControlApiApplication {
 
-    static void main(String[] args) throws UnknownHostException {
+    public static void main(String[] args) throws UnknownHostException {
         SpringApplication app = new SpringApplication(AttendanceAccessControlApiApplication.class);
         Environment env = app.run(args).getEnvironment();
 
