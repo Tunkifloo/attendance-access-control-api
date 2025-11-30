@@ -31,3 +31,14 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Firebase Credentials
+firebase-credentials.json
+*-firebase-adminsdk-*.json
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
