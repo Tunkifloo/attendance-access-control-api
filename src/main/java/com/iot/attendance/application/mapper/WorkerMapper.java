@@ -2,11 +2,8 @@ package com.iot.attendance.application.mapper;
 
 import com.iot.attendance.domain.model.Worker;
 import com.iot.attendance.domain.valueobjects.FingerprintId;
-import com.iot.attendance.domain.valueobjects.RfidTag;
 import com.iot.attendance.infrastructure.persistence.entity.WorkerEntity;
 import org.springframework.stereotype.Component;
-
-import java.util.stream.Collectors;
 
 @Component
 public class WorkerMapper {
@@ -21,9 +18,6 @@ public class WorkerMapper {
                 .phoneNumber(entity.getPhoneNumber())
                 .fingerprintId(entity.getFingerprintId() != null ?
                         FingerprintId.of(entity.getFingerprintId()) : null)
-                .rfidTags(entity.getRfidTags().stream()
-                        .map(RfidTag::of)
-                        .collect(Collectors.toSet()))
                 .hasRestrictedAreaAccess(entity.isHasRestrictedAreaAccess())
                 .status(entity.getStatus())
                 .createdAt(entity.getCreatedAt())
@@ -41,9 +35,6 @@ public class WorkerMapper {
                 .phoneNumber(domain.getPhoneNumber())
                 .fingerprintId(domain.getFingerprintId() != null ?
                         domain.getFingerprintId().getValue() : null)
-                .rfidTags(domain.getRfidTags().stream()
-                        .map(RfidTag::getUid)
-                        .collect(Collectors.toSet()))
                 .hasRestrictedAreaAccess(domain.isHasRestrictedAreaAccess())
                 .status(domain.getStatus())
                 .createdAt(domain.getCreatedAt())

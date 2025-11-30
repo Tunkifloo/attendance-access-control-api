@@ -1,5 +1,6 @@
 package com.iot.attendance.presentation.controller;
 
+import com.iot.attendance.application.dto.request.AddRfidTagRequest;
 import com.iot.attendance.application.dto.request.AssignFingerprintRequest;
 import com.iot.attendance.application.dto.request.CreateWorkerRequest;
 import com.iot.attendance.application.dto.request.UpdateWorkerRequest;
@@ -7,6 +8,8 @@ import com.iot.attendance.application.dto.response.ApiResponse;
 import com.iot.attendance.application.dto.response.WorkerResponse;
 import com.iot.attendance.application.service.WorkerService;
 import com.iot.attendance.domain.enums.WorkerStatus;
+import com.iot.attendance.infrastructure.persistence.entity.RfidCardEntity;
+import com.iot.attendance.infrastructure.persistence.repository.RfidCardRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -18,6 +21,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/v1/workers")
@@ -27,22 +31,63 @@ import java.util.List;
 public class WorkerController {
 
     private final WorkerService workerService;
+    private final RfidCardRepository rfidCardRepository;
+
+
+    @GetMapping("/rfid/unassigned")
+    @Operation(summary = "Listar tarjetas RFID disponibles",
+            description = "Devuelve los UIDs de las tarjetas que han sido escaneadas pero no tienen dueño asignado")
+    public ResponseEntity<ApiResponse<List<String>>> getUnassignedRfidCards() {
+        List<String> unassignedCards = rfidCardRepository.findByWorkerIsNull().stream()
+                .map(RfidCardEntity::getUid)
+                .collect(Collectors.toList());
+
+        return ResponseEntity.ok(ApiResponse.success(unassignedCards));
+    }
+
+    @PostMapping("/{id}/rfid-tags")
+    @Operation(summary = "Asignar tarjeta RFID a trabajador",
+            description = "Vincula una tarjeta existente del pool al trabajador")
+    public ResponseEntity<ApiResponse<WorkerResponse>> addRfidTag(
+            @PathVariable Long id,
+            @RequestBody AddRfidTagRequest request) {
+
+        return ResponseEntity.ok(ApiResponse.success(
+                "RFID tag linked successfully",
+                workerService.addRfidTag(id, request.getRfidTag())
+        ));
+    }
+
+    @DeleteMapping("/{id}/rfid-tags")
+    @Operation(summary = "Desvincular tarjeta RFID",
+            description = "Quita la tarjeta del trabajador y la devuelve al pool de disponibles")
+    public ResponseEntity<ApiResponse<WorkerResponse>> removeRfidTag(
+            @PathVariable Long id,
+            @RequestParam String rfidTag) {
+
+        log.info("Removing RFID tag {} from worker {}", rfidTag, id);
+        WorkerResponse response = workerService.removeRfidTag(id, rfidTag);
+
+        return ResponseEntity.ok(ApiResponse.success("RFID tag unlinked (returned to pool)", response));
+    }
 
     @PostMapping
-    @Operation(summary = "Crear trabajador", description = "Registra un nuevo trabajador en el sistema")
+    @Operation(summary = "Crear trabajador",
+            description = "Inicia el modo registro en el ESP32 y ESPERA hasta obtener la huella. " +
+                    "Esta operación puede tardar hasta 40 segundos.")
     public ResponseEntity<ApiResponse<WorkerResponse>> createWorker(
             @Valid @RequestBody CreateWorkerRequest request) {
 
-        log.info("Creating new worker: {}", request.getDocumentNumber());
+        log.info("Starting worker creation flow for: {}", request.getDocumentNumber());
         WorkerResponse response = workerService.createWorker(request);
 
         return ResponseEntity
                 .status(HttpStatus.CREATED)
-                .body(ApiResponse.success("Worker created successfully", response));
+                .body(ApiResponse.success("Worker created and fingerprint registered successfully", response));
     }
 
     @PostMapping("/bulk")
-    @Operation(summary = "Crear trabajadores en lote", description = "Carga una lista de trabajadores")
+    @Operation(summary = "Crear trabajadores en lote", description = "Carga una lista de trabajadores (Sin registro biométrico automático)")
     public ResponseEntity<ApiResponse<List<WorkerResponse>>> bulkCreateWorkers(
             @Valid @RequestBody List<CreateWorkerRequest> requests) {
 
@@ -129,39 +174,15 @@ public class WorkerController {
     }
 
     @PostMapping("/{id}/fingerprint")
-    @Operation(summary = "Asignar huella dactilar a trabajador")
+    @Operation(summary = "Asignar huella dactilar manualmente (Solo si falló el registro automático)")
     public ResponseEntity<ApiResponse<WorkerResponse>> assignFingerprint(
             @PathVariable Long id,
             @Valid @RequestBody AssignFingerprintRequest request) {
 
-        log.info("Assigning fingerprint {} to worker {}", request.getFingerprintId(), id);
+        log.info("Manually assigning fingerprint {} to worker {}", request.getFingerprintId(), id);
         WorkerResponse response = workerService.assignFingerprint(id, request);
 
         return ResponseEntity.ok(ApiResponse.success("Fingerprint assigned successfully", response));
-    }
-
-    @PostMapping("/{id}/rfid-tags")
-    @Operation(summary = "Agregar tag RFID a trabajador")
-    public ResponseEntity<ApiResponse<WorkerResponse>> addRfidTag(
-            @PathVariable Long id,
-            @RequestParam String rfidTag) {
-
-        log.info("Adding RFID tag {} to worker {}", rfidTag, id);
-        WorkerResponse response = workerService.addRfidTag(id, rfidTag);
-
-        return ResponseEntity.ok(ApiResponse.success("RFID tag added successfully", response));
-    }
-
-    @DeleteMapping("/{id}/rfid-tags")
-    @Operation(summary = "Eliminar tag RFID de trabajador")
-    public ResponseEntity<ApiResponse<WorkerResponse>> removeRfidTag(
-            @PathVariable Long id,
-            @RequestParam String rfidTag) {
-
-        log.info("Removing RFID tag {} from worker {}", rfidTag, id);
-        WorkerResponse response = workerService.removeRfidTag(id, rfidTag);
-
-        return ResponseEntity.ok(ApiResponse.success("RFID tag removed successfully", response));
     }
 
     @PostMapping("/{id}/grant-access")

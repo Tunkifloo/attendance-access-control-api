@@ -45,15 +45,9 @@ public class WorkerEntity {
     @Column(name = "fingerprint_id", unique = true)
     private Integer fingerprintId;
 
-    @ElementCollection(fetch = FetchType.EAGER)
-    @CollectionTable(
-            name = "worker_rfid_tags",
-            joinColumns = @JoinColumn(name = "worker_id"),
-            indexes = @Index(name = "idx_rfid_uid", columnList = "rfid_uid")
-    )
-    @Column(name = "rfid_uid", length = 50)
+    @OneToMany(mappedBy = "worker", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @Builder.Default
-    private Set<String> rfidTags = new HashSet<>();
+    private Set<RfidCardEntity> rfidCards = new HashSet<>();
 
     @Column(name = "has_restricted_area_access", nullable = false)
     @Builder.Default

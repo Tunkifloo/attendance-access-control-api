@@ -1,5 +1,6 @@
 package com.iot.attendance.infrastructure.firebase;
 
+import com.iot.attendance.infrastructure.exception.FirebaseException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -51,6 +52,65 @@ public class FirebaseRealtimeService {
     public void setAdminState(String state) {
         String url = String.format("%s/admin/estado.json", databaseUrl);
         sendPutRequest(url, state, "estado admin");
+    }
+
+    public void startRegistrationMode() {
+        log.info(">> Activando MODO REGISTRO en ESP32...");
+        setAdminState("ESPERANDO_REGISTRO");
+        setAdminCommand("REGISTRAR");
+    }
+
+    public Integer waitForNewFingerprintId(int timeoutSeconds) {
+        log.info(">> Esperando a que el usuario registre su huella (Timeout: {}s)...", timeoutSeconds);
+
+        long endTime = System.currentTimeMillis() + (timeoutSeconds * 1000);
+        String lastState = "";
+
+        while (System.currentTimeMillis() < endTime) {
+            try {
+                // Leemos el estado actual síncronamente (usando tu método getAdminCommandSync o similar para el estado)
+                String currentState = getAdminStateSync();
+
+                if (currentState != null && !currentState.equals(lastState)) {
+                    log.info(">> Estado ESP32: {}", currentState);
+                    lastState = currentState;
+
+                    // El ESP32 envía "REGISTRO EXITO ID X" al finalizar
+                    if (currentState.startsWith("REGISTRO EXITO ID")) {
+                        // Extraer el número
+                        String idStr = currentState.replace("REGISTRO EXITO ID ", "").trim();
+                        return Integer.parseInt(idStr);
+                    }
+
+                    if (currentState.contains("FALLO") || currentState.contains("TIMEOUT")) {
+                        throw new FirebaseException("El registro falló en el hardware: " + currentState);
+                    }
+                }
+
+                // Esperar 1 segundo antes de volver a preguntar
+                Thread.sleep(1000);
+
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new FirebaseException("Espera interrumpida", e);
+            }
+        }
+
+        throw new FirebaseException("Tiempo de espera agotado. El usuario no puso el dedo a tiempo.");
+    }
+
+    private String getAdminStateSync() {
+        String url = String.format("%s/admin/estado.json", databaseUrl);
+        try {
+            String response = restTemplate.getForObject(url, String.class);
+            if (response == null || response.equals("null")) return "";
+            if (response.startsWith("\"") && response.endsWith("\"")) {
+                return response.substring(1, response.length() - 1);
+            }
+            return response;
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     public void setTargetFingerprintId(Integer fingerprintId) {

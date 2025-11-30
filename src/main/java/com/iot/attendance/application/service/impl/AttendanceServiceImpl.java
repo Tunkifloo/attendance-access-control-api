@@ -9,9 +9,11 @@ import com.iot.attendance.infrastructure.exception.BusinessException;
 import com.iot.attendance.infrastructure.exception.ResourceNotFoundException;
 import com.iot.attendance.infrastructure.firebase.FirebaseRealtimeService;
 import com.iot.attendance.infrastructure.persistence.entity.AttendanceEntity;
+import com.iot.attendance.infrastructure.persistence.entity.RfidCardEntity;
 import com.iot.attendance.infrastructure.persistence.entity.SystemConfigurationEntity;
 import com.iot.attendance.infrastructure.persistence.entity.WorkerEntity;
 import com.iot.attendance.infrastructure.persistence.repository.AttendanceRepository;
+import com.iot.attendance.infrastructure.persistence.repository.RfidCardRepository;
 import com.iot.attendance.infrastructure.persistence.repository.SystemConfigurationRepository;
 import com.iot.attendance.infrastructure.persistence.repository.WorkerRepository;
 import lombok.Getter;
@@ -39,17 +41,26 @@ public class AttendanceServiceImpl implements AttendanceService {
     @Getter
     private final AttendanceMapper attendanceMapper;
     private final FirebaseRealtimeService firebaseService;
+    private final RfidCardRepository rfidCardRepository;
 
     @Override
     public AttendanceResponse recordCheckIn(RfidAttendanceRequest request) {
         log.info("Recording check-in for RFID: {}", request.getRfidUid());
 
-        String normalizedRfid = request.getRfidUid().toUpperCase().trim();
+        // Normalizar
+        String normalizedRfid = request.getRfidUid().toUpperCase().replace(" ", "").trim();
 
-        WorkerEntity worker = workerRepository.findByRfidTag(normalizedRfid)
+        // Buscar Tarjeta
+        RfidCardEntity card = rfidCardRepository.findById(normalizedRfid)
                 .orElseThrow(() -> new ResourceNotFoundException(
-                        "Worker not found with RFID tag: " + normalizedRfid
+                        "RFID Tag not registered in system: " + normalizedRfid
                 ));
+
+        // Obtener Worker de la tarjeta
+        WorkerEntity worker = card.getWorker();
+        if (worker == null) {
+            throw new ResourceNotFoundException("RFID Tag exists but is not assigned to any worker");
+        }
 
         SystemConfigurationEntity config = getCurrentConfiguration();
         LocalDateTime checkInTime = request.getTimestamp() != null ?
@@ -73,13 +84,11 @@ public class AttendanceServiceImpl implements AttendanceService {
                 .status(AttendanceStatus.CHECKED_IN)
                 .build();
 
-        // Calcular tardanza
         calculateLateness(entity, config);
 
         AttendanceEntity saved = attendanceRepository.save(entity);
         log.info("Check-in recorded for worker {} at {}", worker.getId(), checkInTime);
 
-        // Sincronizar con Firebase
         firebaseService.logAttendance(normalizedRfid, checkInTime, saved.isLate());
 
         return mapToResponse(saved, worker);
@@ -89,12 +98,18 @@ public class AttendanceServiceImpl implements AttendanceService {
     public AttendanceResponse recordCheckOut(RfidAttendanceRequest request) {
         log.info("Recording check-out for RFID: {}", request.getRfidUid());
 
-        String normalizedRfid = request.getRfidUid().toUpperCase().trim();
+        String normalizedRfid = request.getRfidUid().toUpperCase().replace(" ", "").trim();
 
-        WorkerEntity worker = workerRepository.findByRfidTag(normalizedRfid)
+        // Buscar Tarjeta y Worker
+        RfidCardEntity card = rfidCardRepository.findById(normalizedRfid)
                 .orElseThrow(() -> new ResourceNotFoundException(
-                        "Worker not found with RFID tag: " + normalizedRfid
+                        "RFID Tag not registered in system: " + normalizedRfid
                 ));
+
+        WorkerEntity worker = card.getWorker();
+        if (worker == null) {
+            throw new ResourceNotFoundException("RFID Tag exists but is not assigned to any worker");
+        }
 
         AttendanceEntity entity = attendanceRepository.findActiveAttendanceByWorkerId(worker.getId())
                 .orElseThrow(() -> new BusinessException(
@@ -108,7 +123,6 @@ public class AttendanceServiceImpl implements AttendanceService {
         entity.setCheckOutTime(checkOutTime);
         entity.setStatus(AttendanceStatus.CHECKED_OUT);
 
-        // Calcular tiempo trabajado
         Duration workedDuration = Duration.between(entity.getCheckInTime(), checkOutTime);
         entity.setWorkedDuration(workedDuration);
         entity.setUpdatedAt(LocalDateTime.now());
@@ -116,7 +130,6 @@ public class AttendanceServiceImpl implements AttendanceService {
         AttendanceEntity updated = attendanceRepository.save(entity);
         log.info("Check-out recorded for worker {} at {}", worker.getId(), checkOutTime);
 
-        // Sincronizar con Firebase
         firebaseService.logAttendance(normalizedRfid, checkOutTime, false);
 
         return mapToResponse(updated, worker);
