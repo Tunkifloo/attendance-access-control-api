@@ -2,7 +2,7 @@ spring:
   jpa:
     hibernate:
       ddl-auto: update
-    show-sql: true
+    show-sql: false
   jmx:
     enabled: false
 
@@ -18,8 +18,9 @@ management:
 
 logging:
   level:
-    root: DEBUG
+    root: WARN
     com.iot.attendance: DEBUG
-    com.google.firebase: DEBUG
-    sun.rmi: OFF
-    javax.management.remote.rmi: OFF
+    com.iot.attendance.presentation.controller: DEBUG
+    com.iot.attendance.infrastructure.exception: DEBUG
+    org.springframework.web.servlet.mvc.method.annotation: DEBUG
+    org.hibernate.engine.jdbc.spi.SqlExceptionHelper: ERROR

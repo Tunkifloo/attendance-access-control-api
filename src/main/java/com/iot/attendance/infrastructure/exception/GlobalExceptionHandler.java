@@ -5,7 +5,6 @@ import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -22,7 +21,9 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleResourceNotFoundException(
             ResourceNotFoundException ex, WebRequest request) {
 
-        log.error("Resource not found: {}", ex.getMessage());
+        log.error("Resource not found: {} | Path: {}",
+                ex.getMessage(),
+                request.getDescription(false));
 
         ErrorResponse errorResponse = ErrorResponse.builder()
                 .status(HttpStatus.NOT_FOUND.value())
@@ -38,7 +39,9 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleResourceAlreadyExistsException(
             ResourceAlreadyExistsException ex, WebRequest request) {
 
-        log.error("Resource already exists: {}", ex.getMessage());
+        log.error("Resource conflict: {} | Path: {}",
+                ex.getMessage(),
+                request.getDescription(false));
 
         ErrorResponse errorResponse = ErrorResponse.builder()
                 .status(HttpStatus.CONFLICT.value())
@@ -54,7 +57,9 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleBusinessException(
             BusinessException ex, WebRequest request) {
 
-        log.error("Business rule violation: {}", ex.getMessage());
+        log.error("Business rule violation: {} | Path: {}",
+                ex.getMessage(),
+                request.getDescription(false));
 
         ErrorResponse errorResponse = ErrorResponse.builder()
                 .status(HttpStatus.BAD_REQUEST.value())
@@ -70,7 +75,10 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleFirebaseException(
             FirebaseException ex, WebRequest request) {
 
-        log.error("Firebase error: {}", ex.getMessage());
+        log.error("Firebase error: {} | Path: {}",
+                ex.getMessage(),
+                request.getDescription(false),
+                ex);
 
         ErrorResponse errorResponse = ErrorResponse.builder()
                 .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
@@ -86,8 +94,6 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleValidationException(
             MethodArgumentNotValidException ex, WebRequest request) {
 
-        log.error("Validation error: {}", ex.getMessage());
-
         List<ErrorResponse.ValidationError> validationErrors = ex.getBindingResult()
                 .getFieldErrors()
                 .stream()
@@ -96,6 +102,14 @@ public class GlobalExceptionHandler {
                         .message(error.getDefaultMessage())
                         .build())
                 .collect(Collectors.toList());
+
+        log.error("Validation failed on {} | Errors: {} | Path: {}",
+                ex.getParameter().getParameterType().getSimpleName(),
+                validationErrors.size(),
+                request.getDescription(false));
+
+        validationErrors.forEach(error ->
+                log.debug("  - Field '{}': {}", error.getField(), error.getMessage()));
 
         ErrorResponse errorResponse = ErrorResponse.builder()
                 .status(HttpStatus.BAD_REQUEST.value())
@@ -112,8 +126,6 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleConstraintViolationException(
             ConstraintViolationException ex, WebRequest request) {
 
-        log.error("Constraint violation: {}", ex.getMessage());
-
         List<ErrorResponse.ValidationError> validationErrors = ex.getConstraintViolations()
                 .stream()
                 .map(violation -> ErrorResponse.ValidationError.builder()
@@ -121,6 +133,13 @@ public class GlobalExceptionHandler {
                         .message(violation.getMessage())
                         .build())
                 .collect(Collectors.toList());
+
+        log.error("Constraint violation | Errors: {} | Path: {}",
+                validationErrors.size(),
+                request.getDescription(false));
+
+        validationErrors.forEach(error ->
+                log.debug("  - Field '{}': {}", error.getField(), error.getMessage()));
 
         ErrorResponse errorResponse = ErrorResponse.builder()
                 .status(HttpStatus.BAD_REQUEST.value())
@@ -137,7 +156,11 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleGenericException(
             Exception ex, WebRequest request) {
 
-        log.error("Unexpected error: ", ex);
+        log.error("Unexpected error | Type: {} | Message: {} | Path: {}",
+                ex.getClass().getSimpleName(),
+                ex.getMessage(),
+                request.getDescription(false),
+                ex);
 
         ErrorResponse errorResponse = ErrorResponse.builder()
                 .status(HttpStatus.INTERNAL_SERVER_ERROR.value())

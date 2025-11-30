@@ -23,6 +23,20 @@ public class FirebaseAdminController {
 
     private final FirebaseRealtimeService firebaseService;
 
+    @GetMapping("/diagnose")
+    @Operation(summary = "Diagnóstico completo del nodo admin",
+            description = "Lee todo el nodo admin para debugging")
+    public ResponseEntity<ApiResponse<Map<String, String>>> diagnose() {
+        log.info("Ejecutando diagnóstico de Firebase");
+
+        firebaseService.diagnoseAdminNode();
+
+        Map<String, String> response = new HashMap<>();
+        response.put("message", "Check server logs for detailed diagnostics");
+
+        return ResponseEntity.ok(ApiResponse.success("Diagnostics completed", response));
+    }
+
     @GetMapping("/command")
     @Operation(summary = "Obtener comando actual",
             description = "Lee el comando actual configurado en Firebase para el ESP32")
@@ -122,14 +136,10 @@ public class FirebaseAdminController {
     @Operation(summary = "Obtener último ID de huella creado",
             description = "Consulta el ID de la última huella registrada por el ESP32")
     public ResponseEntity<ApiResponse<Map<String, Integer>>> getLastFingerprintId() {
-        String idStr = firebaseService.getAdminCommandSync();
+        Integer lastId = firebaseService.getLastFingerprintIdSync();
 
         Map<String, Integer> response = new HashMap<>();
-        try {
-            response.put("lastFingerprintId", Integer.parseInt(idStr));
-        } catch (NumberFormatException e) {
-            response.put("lastFingerprintId", null);
-        }
+        response.put("lastFingerprintId", lastId);
 
         return ResponseEntity.ok(ApiResponse.success(response));
     }

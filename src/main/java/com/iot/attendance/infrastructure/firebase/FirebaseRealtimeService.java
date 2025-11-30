@@ -1,252 +1,145 @@
 package com.iot.attendance.infrastructure.firebase;
 
-import com.google.firebase.database.*;
-import com.iot.attendance.infrastructure.exception.FirebaseException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class FirebaseRealtimeService {
 
-    private final FirebaseDatabase firebaseDatabase;
-    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    @Value("${firebase.database-url}")
+    private String databaseUrl;
+    private final RestTemplate restTemplate = new RestTemplate();
+
 
     public void logAttendance(String rfidUid, LocalDateTime timestamp, boolean isLate) {
-        try {
-            DatabaseReference ref = firebaseDatabase.getReference("asistencia");
+        String url = String.format("%s/logs/asistencia.json", databaseUrl);
+        String message = String.format("Marcaje RFID: %s", rfidUid);
 
-            String message = String.format("Marcaje RFID: %s", rfidUid);
-
-            ref.push().setValue(message, (error, ref1) -> {
-                if (error != null) {
-                    log.error("Error writing to Firebase: {}", error.getMessage());
-                } else {
-                    log.info("Attendance logged to Firebase for RFID: {}", rfidUid);
-                }
-            });
-
-        } catch (Exception e) {
-            log.error("Error logging attendance to Firebase: {}", e.getMessage());
-            throw new FirebaseException("Failed to log attendance to Firebase", e);
-        }
+        sendPostRequest(url, message, "asistencia");
     }
 
     public void logAccessGranted(Integer fingerprintId, Long workerId) {
-        try {
-            DatabaseReference ref = firebaseDatabase.getReference("accesos");
+        String url = String.format("%s/logs/accesos.json", databaseUrl);
+        String message = String.format("Puerta abierta ID: %d", fingerprintId);
 
-            String message = String.format("Puerta abierta ID: %d", fingerprintId);
-
-            ref.push().setValue(message, (error, ref1) -> {
-                if (error != null) {
-                    log.error("Error writing access to Firebase: {}", error.getMessage());
-                } else {
-                    log.info("Access granted logged to Firebase for fingerprint: {}", fingerprintId);
-                }
-            });
-
-        } catch (Exception e) {
-            log.error("Error logging access to Firebase: {}", e.getMessage());
-            throw new FirebaseException("Failed to log access to Firebase", e);
-        }
+        sendPostRequest(url, message, "acceso concedido");
     }
 
     public void logAccessDenied(Integer fingerprintId, String reason) {
-        try {
-            DatabaseReference ref = firebaseDatabase.getReference("seguridad");
+        String url = String.format("%s/logs/seguridad.json", databaseUrl);
+        String message = String.format("Intento fallido huella: %d - %s", fingerprintId, reason);
 
-            String message = String.format("Intento fallido huella: %d - %s", fingerprintId, reason);
-
-            ref.push().setValue(message, (error, ref1) -> {
-                if (error != null) {
-                    log.error("Error writing denied access to Firebase: {}", error.getMessage());
-                } else {
-                    log.info("Access denied logged to Firebase for fingerprint: {}", fingerprintId);
-                }
-            });
-
-        } catch (Exception e) {
-            log.error("Error logging denied access to Firebase: {}", e.getMessage());
-            throw new FirebaseException("Failed to log denied access to Firebase", e);
-        }
-    }
-
-    public CompletableFuture<String> getAdminCommand() {
-        CompletableFuture<String> future = new CompletableFuture<>();
-
-        try {
-            DatabaseReference ref = firebaseDatabase.getReference("admin/comando");
-
-            ref.addListenerForSingleValueEvent(new ValueEventListener() {
-                @Override
-                public void onDataChange(DataSnapshot snapshot) {
-                    if (snapshot.exists()) {
-                        String command = snapshot.getValue(String.class);
-                        future.complete(command != null ? command : "NADA");
-                    } else {
-                        future.complete("NADA");
-                    }
-                }
-
-                @Override
-                public void onCancelled(DatabaseError error) {
-                    log.error("Error getting admin command: {}", error.getMessage());
-                    future.completeExceptionally(
-                            new FirebaseException("Failed to get admin command: " + error.getMessage())
-                    );
-                }
-            });
-
-        } catch (Exception e) {
-            log.error("Error getting admin command from Firebase: {}", e.getMessage());
-            future.completeExceptionally(new FirebaseException("Failed to get admin command", e));
-        }
-
-        return future;
+        sendPostRequest(url, message, "acceso denegado");
     }
 
     public void setAdminCommand(String command) {
-        try {
-            DatabaseReference ref = firebaseDatabase.getReference("admin/comando");
-
-            ref.setValue(command, (error, ref1) -> {
-                if (error != null) {
-                    log.error("Error setting admin command: {}", error.getMessage());
-                } else {
-                    log.info("Admin command set to: {}", command);
-                }
-            });
-
-        } catch (Exception e) {
-            log.error("Error setting admin command: {}", e.getMessage());
-            throw new FirebaseException("Failed to set admin command", e);
-        }
+        String url = String.format("%s/admin/comando.json", databaseUrl);
+        sendPutRequest(url, command, "comando admin");
     }
 
     public void setAdminState(String state) {
-        try {
-            DatabaseReference ref = firebaseDatabase.getReference("admin/estado");
-
-            ref.setValue(state, (error, ref1) -> {
-                if (error != null) {
-                    log.error("Error setting admin state: {}", error.getMessage());
-                } else {
-                    log.info("Admin state set to: {}", state);
-                }
-            });
-
-        } catch (Exception e) {
-            log.error("Error setting admin state: {}", e.getMessage());
-            throw new FirebaseException("Failed to set admin state", e);
-        }
-    }
-
-    public void setLastFingerprintId(Integer fingerprintId) {
-        try {
-            DatabaseReference ref = firebaseDatabase.getReference("admin/ultimo_id_creado");
-
-            ref.setValue(fingerprintId, (error, ref1) -> {
-                if (error != null) {
-                    log.error("Error setting last fingerprint ID: {}", error.getMessage());
-                } else {
-                    log.info("Last fingerprint ID set to: {}", fingerprintId);
-                }
-            });
-
-        } catch (Exception e) {
-            log.error("Error setting last fingerprint ID: {}", e.getMessage());
-            throw new FirebaseException("Failed to set last fingerprint ID", e);
-        }
+        String url = String.format("%s/admin/estado.json", databaseUrl);
+        sendPutRequest(url, state, "estado admin");
     }
 
     public void setTargetFingerprintId(Integer fingerprintId) {
+        String url = String.format("%s/admin/id_target.json", databaseUrl);
+        // Los números no llevan comillas en JSON
+        sendPutRequestRaw(url, fingerprintId.toString(), "target ID");
+    }
+
+    public Integer getLastFingerprintIdSync() {
+        String url = String.format("%s/admin/ultimo_id_creado.json", databaseUrl);
+        log.info(">> Leyendo ID (REST): {}", url);
+
         try {
-            DatabaseReference ref = firebaseDatabase.getReference("admin/id_target");
-
-            ref.setValue(fingerprintId, (error, ref1) -> {
-                if (error != null) {
-                    log.error("Error setting target fingerprint ID: {}", error.getMessage());
-                } else {
-                    log.info("Target fingerprint ID set to: {}", fingerprintId);
-                }
-            });
-
+            String response = restTemplate.getForObject(url, String.class);
+            if (response != null && !response.equals("null")) {
+                return Integer.parseInt(response);
+            }
         } catch (Exception e) {
-            log.error("Error setting target fingerprint ID: {}", e.getMessage());
-            throw new FirebaseException("Failed to set target fingerprint ID", e);
+            log.error("Error leyendo lastFingerprintId via REST: {}", e.getMessage());
         }
+        return null;
     }
 
     public String getAdminCommandSync() {
-        CountDownLatch latch = new CountDownLatch(1);
-        final String[] result = {null};
-
-        DatabaseReference ref = firebaseDatabase.getReference("admin/comando");
-
-        ref.addListenerForSingleValueEvent(new ValueEventListener() {
-            @Override
-            public void onDataChange(DataSnapshot snapshot) {
-                if (snapshot.exists()) {
-                    result[0] = snapshot.getValue(String.class);
-                }
-                latch.countDown();
-            }
-
-            @Override
-            public void onCancelled(DatabaseError error) {
-                log.error("Error getting admin command sync: {}", error.getMessage());
-                latch.countDown();
-            }
-        });
+        String url = String.format("%s/admin/comando.json", databaseUrl);
+        log.debug(">> Leyendo Comando (REST): {}", url);
 
         try {
-            latch.await(5, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new FirebaseException("Timeout waiting for Firebase response", e);
+            String response = restTemplate.getForObject(url, String.class);
+            // Firebase devuelve el string con comillas (ej: "NADA"), hay que limpiarlas
+            return cleanJsonString(response);
+        } catch (Exception e) {
+            log.error("Error leyendo comando via REST: {}", e.getMessage());
+            return "ERROR";
         }
-
-        return result[0] != null ? result[0] : "NADA";
     }
 
-    public void listenToAdminCommands(AdminCommandListener listener) {
-        DatabaseReference ref = firebaseDatabase.getReference("admin/comando");
-
-        ref.addValueEventListener(new ValueEventListener() {
-            @Override
-            public void onDataChange(DataSnapshot snapshot) {
-                if (snapshot.exists()) {
-                    String command = snapshot.getValue(String.class);
-                    if (command != null && !command.equals("NADA")) {
-                        log.info("Admin command received: {}", command);
-                        listener.onCommandReceived(command);
-                    }
-                }
-            }
-
-            @Override
-            public void onCancelled(DatabaseError error) {
-                log.error("Error listening to admin commands: {}", error.getMessage());
-                listener.onError(error.getMessage());
-            }
-        });
+    // Mantenemos la firma para compatibilidad, pero usamos la lógica síncrona dentro
+    public CompletableFuture<String> getAdminCommand() {
+        return CompletableFuture.supplyAsync(this::getAdminCommandSync);
     }
 
-    @FunctionalInterface
-    public interface AdminCommandListener {
-        void onCommandReceived(String command);
-
-        default void onError(String error) {
-            log.error("Admin command listener error: {}", error);
+    public void diagnoseAdminNode() {
+        String url = String.format("%s/admin.json", databaseUrl);
+        log.info(">> Diagnóstico (REST): {}", url);
+        try {
+            String response = restTemplate.getForObject(url, String.class);
+            log.info("✓ Respuesta Diagnóstico: {}", response);
+        } catch (Exception e) {
+            log.error("Error en diagnóstico REST: {}", e.getMessage());
         }
+    }
+
+    private void sendPostRequest(String url, String message, String logContext) {
+        try {
+            // En Firebase REST, un string debe ir entre comillas para ser un JSON válido
+            String jsonBody = "\"" + message + "\"";
+            restTemplate.postForLocation(url, createHttpEntity(jsonBody));
+            log.info("✓ Log registrado ({}) via REST", logContext);
+        } catch (Exception e) {
+            log.error("Error escribiendo {} via REST: {}", logContext, e.getMessage());
+        }
+    }
+
+    private void sendPutRequest(String url, String value, String logContext) {
+        sendPutRequestRaw(url, "\"" + value + "\"", logContext);
+    }
+
+    private void sendPutRequestRaw(String url, String jsonBody, String logContext) {
+        try {
+            restTemplate.put(url, createHttpEntity(jsonBody));
+            log.info("✓ {} actualizado a: {}", logContext, jsonBody);
+        } catch (Exception e) {
+            log.error("Error actualizando {} via REST: {}", logContext, e.getMessage());
+        }
+    }
+
+    private HttpEntity<String> createHttpEntity(String body) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        return new HttpEntity<>(body, headers);
+    }
+
+    private String cleanJsonString(String response) {
+        if (response == null || response.equals("null")) return "NADA";
+        // Eliminar comillas iniciales y finales que devuelve la API REST
+        if (response.startsWith("\"") && response.endsWith("\"")) {
+            return response.substring(1, response.length() - 1);
+        }
+        return response;
     }
 }

@@ -41,6 +41,8 @@ public class FirebaseConfig {
             FirebaseOptions options = FirebaseOptions.builder()
                     .setCredentials(GoogleCredentials.fromStream(serviceAccount))
                     .setDatabaseUrl(databaseUrl)
+                    .setConnectTimeout(30000)
+                    .setReadTimeout(30000)
                     .build();
 
             FirebaseApp app = FirebaseApp.initializeApp(options);
@@ -63,6 +65,7 @@ public class FirebaseConfig {
     public FirebaseDatabase firebaseDatabase(FirebaseApp firebaseApp) {
         log.info("Creating Firebase Realtime Database instance");
         FirebaseDatabase database = FirebaseDatabase.getInstance(firebaseApp);
+        database.setPersistenceEnabled(false);
         log.info("Firebase Database instance created successfully");
         return database;
     }
