@@ -1,4 +1,4 @@
-package com.iot.attendanceaccesscontrolapi.domain.model;
+package com.iot.attendance.domain.model;
 
 import lombok.*;
 

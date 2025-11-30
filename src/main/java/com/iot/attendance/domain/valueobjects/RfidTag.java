@@ -1,4 +1,4 @@
-package com.iot.attendanceaccesscontrolapi.domain.valueobjects;
+package com.iot.attendance.domain.valueobjects;
 
 import lombok.EqualsAndHashCode;
 import lombok.Getter;

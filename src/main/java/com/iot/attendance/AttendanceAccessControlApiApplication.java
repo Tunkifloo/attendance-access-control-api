@@ -1,4 +1,4 @@
-package com.iot.attendanceaccesscontrolapi;
+package com.iot.attendance;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;

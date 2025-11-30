@@ -1,4 +1,4 @@
-package com.iot.attendanceaccesscontrolapi.domain.enums;
+package com.iot.attendance.domain.enums;
 
 public enum AttendanceStatus {
     CHECKED_IN,

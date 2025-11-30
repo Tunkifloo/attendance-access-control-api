@@ -1,7 +1,7 @@
-package com.iot.attendanceaccesscontrolapi.domain.model;
+package com.iot.attendance.domain.model;
 
-import com.iot.attendanceaccesscontrolapi.domain.enums.AttendanceStatus;
-import com.iot.attendanceaccesscontrolapi.domain.valueobjects.RfidTag;
+import com.iot.attendance.domain.enums.AttendanceStatus;
+import com.iot.attendance.domain.valueobjects.RfidTag;
 import lombok.*;
 
 import java.time.LocalDate;

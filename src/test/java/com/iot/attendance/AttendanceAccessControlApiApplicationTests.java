@@ -1,4 +1,4 @@
-package com.iot.attendanceaccesscontrolapi;
+package com.iot.attendance;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
