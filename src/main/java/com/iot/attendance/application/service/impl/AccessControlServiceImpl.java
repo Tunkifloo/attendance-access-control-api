@@ -15,6 +15,7 @@ import com.iot.attendance.infrastructure.persistence.entity.WorkerEntity;
 import com.iot.attendance.infrastructure.persistence.repository.AccessLogRepository;
 import com.iot.attendance.infrastructure.persistence.repository.SystemConfigurationRepository;
 import com.iot.attendance.infrastructure.persistence.repository.WorkerRepository;
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -34,6 +35,8 @@ public class AccessControlServiceImpl implements AccessControlService {
     private final AccessLogRepository accessLogRepository;
     private final WorkerRepository workerRepository;
     private final SystemConfigurationRepository configRepository;
+
+    @Getter
     private final AccessLogMapper accessLogMapper;
     private final SecurityService securityService;
     private final FirebaseRealtimeService firebaseService;

@@ -14,6 +14,7 @@ import com.iot.attendance.infrastructure.persistence.entity.WorkerEntity;
 import com.iot.attendance.infrastructure.persistence.repository.AttendanceRepository;
 import com.iot.attendance.infrastructure.persistence.repository.SystemConfigurationRepository;
 import com.iot.attendance.infrastructure.persistence.repository.WorkerRepository;
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -34,6 +35,8 @@ public class AttendanceServiceImpl implements AttendanceService {
     private final AttendanceRepository attendanceRepository;
     private final WorkerRepository workerRepository;
     private final SystemConfigurationRepository configRepository;
+
+    @Getter
     private final AttendanceMapper attendanceMapper;
     private final FirebaseRealtimeService firebaseService;
 
@@ -249,4 +252,5 @@ public class AttendanceServiceImpl implements AttendanceService {
         long minutes = duration.toMinutes() % 60;
         return String.format("%dh %dm", hours, minutes);
     }
+
 }
