@@ -15,7 +15,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 @Slf4j
 public class FirebaseHealthCheck {
-
+/*
     private final FirebaseDatabase firebaseDatabase;
     private final FirebaseRealtimeService firebaseService;
 
@@ -126,5 +126,5 @@ public class FirebaseHealthCheck {
         }
     }
         log.info("=".repeat(80));
-   }
+   }*/
 }

@@ -89,7 +89,7 @@ public class AttendanceServiceImpl implements AttendanceService {
         AttendanceEntity saved = attendanceRepository.save(entity);
         log.info("Check-in recorded for worker {} at {}", worker.getId(), checkInTime);
 
-        firebaseService.logAttendance(normalizedRfid, checkInTime, saved.isLate());
+        //firebaseService.logAttendance(normalizedRfid, checkInTime, saved.isLate());
 
         return mapToResponse(saved, worker);
     }
@@ -130,7 +130,7 @@ public class AttendanceServiceImpl implements AttendanceService {
         AttendanceEntity updated = attendanceRepository.save(entity);
         log.info("Check-out recorded for worker {} at {}", worker.getId(), checkOutTime);
 
-        firebaseService.logAttendance(normalizedRfid, checkOutTime, false);
+        //firebaseService.logAttendance(normalizedRfid, checkOutTime, false);
 
         return mapToResponse(updated, worker);
     }
@@ -201,15 +201,17 @@ public class AttendanceServiceImpl implements AttendanceService {
     private void calculateLateness(AttendanceEntity entity, SystemConfigurationEntity config) {
         LocalDateTime checkInTime = entity.getCheckInTime();
         LocalDate attendanceDate = entity.getAttendanceDate();
-
         LocalDateTime workStartDateTime = attendanceDate.atTime(config.getWorkStartTime());
 
-        if (checkInTime.isAfter(workStartDateTime)) {
+        int toleranceMinutes = config.getLateThresholdMinutes() != null ? config.getLateThresholdMinutes() : 0;
+        LocalDateTime lateThresholdTime = workStartDateTime.plusMinutes(toleranceMinutes);
+
+        if (checkInTime.isAfter(lateThresholdTime)) {
             entity.setLate(true);
             Duration lateness = Duration.between(workStartDateTime, checkInTime);
             entity.setLatenessDuration(lateness);
 
-            log.info("Worker is late by {} minutes", lateness.toMinutes());
+            log.info("Worker is late by {} minutes (Tolerance was {} mins)", lateness.toMinutes(), toleranceMinutes);
         } else {
             entity.setLate(false);
             entity.setLatenessDuration(Duration.ZERO);
@@ -231,10 +233,13 @@ public class AttendanceServiceImpl implements AttendanceService {
     }
 
     private AttendanceResponse mapToResponse(AttendanceEntity entity, WorkerEntity worker) {
+        String workerFullName = (worker != null)
+                ? worker.getFirstName() + " " + worker.getLastName()
+                : "Trabajador Desconocido / Eliminado";
         return AttendanceResponse.builder()
                 .id(entity.getId())
                 .workerId(entity.getWorkerId())
-                .workerFullName(worker.getFirstName() + " " + worker.getLastName())
+                .workerFullName(workerFullName)
                 .rfidTag(entity.getRfidTag())
                 .attendanceDate(entity.getAttendanceDate())
                 .checkInTime(entity.getCheckInTime())

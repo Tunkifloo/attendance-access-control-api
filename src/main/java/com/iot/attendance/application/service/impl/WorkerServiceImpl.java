@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -259,8 +260,28 @@ public class WorkerServiceImpl implements WorkerService {
 
     @Override
     public void deleteWorker(Long workerId) {
-        WorkerEntity entity = findWorkerEntityById(workerId);
-        workerRepository.delete(entity);
+        WorkerEntity worker = findWorkerEntityById(workerId);
+
+        if (worker.getFingerprintId() != null) {
+            log.info("Enviando comando BORRAR huella ID {} al hardware...", worker.getFingerprintId());
+            firebaseService.setTargetFingerprintId(worker.getFingerprintId());
+            firebaseService.setAdminCommand("BORRAR");
+            firebaseService.setAdminState("BORRANDO_USUARIO");
+        }
+
+        if (worker.getRfidCards() != null && !worker.getRfidCards().isEmpty()) {
+            List<RfidCardEntity> cardsToRelease = new ArrayList<>(worker.getRfidCards());
+            for (RfidCardEntity card : cardsToRelease) {
+                log.info("Devolviendo tarjeta {} al pool de disponibles", card.getUid());
+                card.setWorker(null);
+                card.setUpdatedAt(LocalDateTime.now());
+                rfidCardRepository.save(card);
+            }
+            worker.getRfidCards().clear();
+        }
+
+        workerRepository.delete(worker);
+        log.info("Trabajador ID {} eliminado de la base de datos.", workerId);
     }
 
     @Override
