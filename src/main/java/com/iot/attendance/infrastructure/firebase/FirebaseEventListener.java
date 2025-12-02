@@ -18,7 +18,7 @@ import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-@Component
+//@Component
 @RequiredArgsConstructor
 @Slf4j
 public class FirebaseEventListener {
