@@ -66,8 +66,9 @@ public class AttendanceServiceImpl implements AttendanceService {
         SystemConfigurationEntity config = getCurrentConfiguration();
         LocalDateTime checkInTime = request.getTimestamp() != null ?
                 request.getTimestamp() : getCurrentDateTime(config);
-        LocalDate attendanceDate = config.getCurrentAttendanceDate() != null ?
-                config.getCurrentAttendanceDate() : checkInTime.toLocalDate();
+        LocalDate attendanceDate = config.getSimulatedDate() != null && config.isSimulationMode()
+                ? config.getSimulatedDate()
+                : checkInTime.toLocalDate();
 
         // Verificar si ya existe un check-in activo
         attendanceRepository.findActiveAttendanceByWorkerId(worker.getId())
@@ -271,5 +272,4 @@ public class AttendanceServiceImpl implements AttendanceService {
         long minutes = duration.toMinutes() % 60;
         return String.format("%dh %dm", hours, minutes);
     }
-
 }

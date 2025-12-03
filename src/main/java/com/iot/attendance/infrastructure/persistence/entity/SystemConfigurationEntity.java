@@ -29,10 +29,11 @@ public class SystemConfigurationEntity {
     private LocalTime workEndTime;
 
     @Column(name = "late_threshold_minutes", nullable = false)
-    private Integer lateThresholdMinutes;
+    @Builder.Default
+    private Integer lateThresholdMinutes = 15;
 
-    @Column(name = "current_attendance_date")
-    private LocalDate currentAttendanceDate;
+    @Column(name = "simulated_date")
+    private LocalDate simulatedDate;
 
     @Column(name = "simulated_date_time")
     private LocalDateTime simulatedDateTime;
@@ -40,14 +41,6 @@ public class SystemConfigurationEntity {
     @Column(name = "simulation_mode", nullable = false)
     @Builder.Default
     private boolean simulationMode = false;
-
-    @Column(name = "max_failed_access_attempts", nullable = false)
-    @Builder.Default
-    private Integer maxFailedAccessAttempts = 3;
-
-    @Column(name = "alert_cooldown_minutes", nullable = false)
-    @Builder.Default
-    private Integer alertCooldownMinutes = 5;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

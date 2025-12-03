@@ -75,6 +75,7 @@ firebase:
 
 attendance:
   work-start-time: "08:00:00"
+  work-end-time: "17:00:00"
   late-threshold-minutes: 15
   timezone: America/Lima
 
