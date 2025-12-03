@@ -40,6 +40,7 @@ public class AttendanceServiceImpl implements AttendanceService {
 
     @Getter
     private final AttendanceMapper attendanceMapper;
+    @Getter
     private final FirebaseRealtimeService firebaseService;
     private final RfidCardRepository rfidCardRepository;
 

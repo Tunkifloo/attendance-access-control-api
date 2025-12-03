@@ -14,6 +14,7 @@ import com.iot.attendance.infrastructure.persistence.entity.RfidCardEntity;
 import com.iot.attendance.infrastructure.persistence.entity.WorkerEntity;
 import com.iot.attendance.infrastructure.persistence.repository.RfidCardRepository;
 import com.iot.attendance.infrastructure.persistence.repository.WorkerRepository;
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -33,6 +34,8 @@ public class WorkerServiceImpl implements WorkerService {
 
     private final WorkerRepository workerRepository;
     private final RfidCardRepository rfidCardRepository;
+
+    @Getter
     private final WorkerMapper workerMapper;
     private final FirebaseRealtimeService firebaseService;
 

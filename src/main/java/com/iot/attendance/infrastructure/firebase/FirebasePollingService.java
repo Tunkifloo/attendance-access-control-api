@@ -3,6 +3,7 @@ package com.iot.attendance.infrastructure.firebase;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iot.attendance.application.dto.request.RfidAttendanceRequest;
+import com.iot.attendance.application.service.AccessAuditService;
 import com.iot.attendance.application.service.impl.SmartAttendanceProcessor;
 import com.iot.attendance.infrastructure.persistence.entity.RfidCardEntity;
 import com.iot.attendance.infrastructure.persistence.repository.RfidCardRepository;
@@ -25,24 +26,33 @@ public class FirebasePollingService {
 
     @Value("${firebase.database-url}")
     private String databaseUrl;
+
     private final RestTemplate restTemplate = new RestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
+
     private final RfidCardRepository rfidCardRepository;
     private final SmartAttendanceProcessor smartAttendanceProcessor;
+    private final AccessAuditService accessAuditService;
+
+    // Patrones de regex
     private static final Pattern RFID_PATTERN = Pattern.compile("Marcaje RFID: ([A-F0-9 ]+)");
-    private final Set<String> processedKeys = Collections.synchronizedSet(new HashSet<>());
+    private static final Pattern ACCESS_GRANTED_PATTERN = Pattern.compile("Puerta abierta ID: (\\d+)");
+    private static final Pattern ACCESS_DENIED_PATTERN = Pattern.compile("Intento fallido huella");
+
+    // Sets para evitar procesar duplicados
+    private final Set<String> processedAttendanceKeys = Collections.synchronizedSet(new HashSet<>());
+    private final Set<String> processedAccessKeys = Collections.synchronizedSet(new HashSet<>());
+    private final Set<String> processedSecurityKeys = Collections.synchronizedSet(new HashSet<>());
 
     @Scheduled(fixedRate = 3000)
     public void pollRecentAttendance() {
         try {
-            // Consultar los últimos 5 registros vía REST
-            // limitToLast=5 es suficiente para el ritmo de un control de asistencia
-            String url = String.format("%s/logs/asistencia.json?orderBy=\"$key\"&limitToLast=5", databaseUrl);
+            String url = String.format("%s/logs/asistencia.json?orderBy=\"$key\"&limitToLast=5",
+                    databaseUrl);
 
             String response = restTemplate.getForObject(url, String.class);
             if (response == null || response.equals("null")) return;
 
-            // Parsear JSON (Firebase devuelve un Map: {"key1": "valor1", "key2": "valor2"})
             JsonNode rootNode = objectMapper.readTree(response);
             Iterator<Map.Entry<String, JsonNode>> fields = rootNode.fields();
 
@@ -51,13 +61,14 @@ public class FirebasePollingService {
                 String key = entry.getKey();
                 String message = entry.getValue().asText();
 
-                // Procesar solo si no lo hemos visto antes
-                if (!processedKeys.contains(key)) {
-                    processLogMessage(message);
-                    processedKeys.add(key);
+                if (!processedAttendanceKeys.contains(key)) {
+                    processAttendanceMessage(message);
+                    processedAttendanceKeys.add(key);
 
-                    // Limpieza simple de memoria: si el set crece mucho (ej. > 1000), limpiarlo
-                    if (processedKeys.size() > 1000) processedKeys.clear();
+                    // Limpieza de memoria
+                    if (processedAttendanceKeys.size() > 1000) {
+                        processedAttendanceKeys.clear();
+                    }
                 }
             }
 
@@ -66,26 +77,91 @@ public class FirebasePollingService {
         }
     }
 
-    private void processLogMessage(String message) {
+    @Scheduled(fixedRate = 3000)
+    public void pollAccessLogs() {
+        try {
+            String url = String.format("%s/logs/accesos.json?orderBy=\"$key\"&limitToLast=5",
+                    databaseUrl);
+
+            String response = restTemplate.getForObject(url, String.class);
+            if (response == null || response.equals("null")) return;
+
+            JsonNode rootNode = objectMapper.readTree(response);
+            Iterator<Map.Entry<String, JsonNode>> fields = rootNode.fields();
+
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> entry = fields.next();
+                String key = entry.getKey();
+                String message = entry.getValue().asText();
+
+                if (!processedAccessKeys.contains(key)) {
+                    processAccessGrantedMessage(message);
+                    processedAccessKeys.add(key);
+
+                    if (processedAccessKeys.size() > 1000) {
+                        processedAccessKeys.clear();
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            log.error("Error en polling de accesos: {}", e.getMessage());
+        }
+    }
+
+    @Scheduled(fixedRate = 3000)
+    public void pollSecurityLogs() {
+        try {
+            String url = String.format("%s/logs/seguridad.json?orderBy=\"$key\"&limitToLast=5",
+                    databaseUrl);
+
+            String response = restTemplate.getForObject(url, String.class);
+            if (response == null || response.equals("null")) return;
+
+            JsonNode rootNode = objectMapper.readTree(response);
+            Iterator<Map.Entry<String, JsonNode>> fields = rootNode.fields();
+
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> entry = fields.next();
+                String key = entry.getKey();
+                String message = entry.getValue().asText();
+
+                if (!processedSecurityKeys.contains(key)) {
+                    processAccessDeniedMessage(message);
+                    processedSecurityKeys.add(key);
+
+                    if (processedSecurityKeys.size() > 1000) {
+                        processedSecurityKeys.clear();
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            log.error("Error en polling de seguridad: {}", e.getMessage());
+        }
+    }
+
+    private void processAttendanceMessage(String message) {
         Matcher matcher = RFID_PATTERN.matcher(message);
         if (matcher.find()) {
             String rawUid = matcher.group(1);
             String normalizedUid = rawUid.toUpperCase().replace(" ", "").trim();
 
-            log.info(">> [REST POLLING] RFID Detectado: {}", normalizedUid);
+            log.info(">> [ASISTENCIA] RFID detectado: {}", normalizedUid);
 
-            // LÓGICA DE CAPTURA
+            // CAPTURA DE TARJETA EN POOL
             Optional<RfidCardEntity> cardOpt = rfidCardRepository.findById(normalizedUid);
 
             if (cardOpt.isEmpty()) {
-                // NUEVA TARJETA -> Guardar en Pool
-                log.info("   -> Tarjeta NUEVA. Guardando en BD...");
+                // NUEVA TARJETA
+                log.info("   -> Tarjeta NUEVA. Guardando en pool...");
                 RfidCardEntity newCard = RfidCardEntity.builder()
                         .uid(normalizedUid)
                         .worker(null)
                         .lastSeen(LocalDateTime.now())
                         .build();
                 rfidCardRepository.save(newCard);
+                log.info("   ✓ Tarjeta guardada en BD");
             } else {
                 // TARJETA EXISTENTE
                 RfidCardEntity card = cardOpt.get();
@@ -94,9 +170,35 @@ public class FirebasePollingService {
 
                 if (card.getWorker() != null) {
                     // TIENE DUEÑO -> Procesar Asistencia
+                    log.info("   -> Tarjeta asignada a trabajador. Procesando asistencia...");
                     processCheckInCheckOut(normalizedUid);
+                } else {
+                    log.info("   -> Tarjeta en pool (sin dueño asignado)");
                 }
             }
+        }
+    }
+
+    private void processAccessGrantedMessage(String message) {
+        Matcher matcher = ACCESS_GRANTED_PATTERN.matcher(message);
+        if (matcher.find()) {
+            Integer fingerprintId = Integer.parseInt(matcher.group(1));
+
+            log.info(">> [ACCESO CONCEDIDO] Huella ID: {}", fingerprintId);
+
+            accessAuditService.logAccessGranted(fingerprintId, LocalDateTime.now());
+
+            log.info("   ✓ Acceso concedido registrado en BD");
+        }
+    }
+
+    private void processAccessDeniedMessage(String message) {
+        if (ACCESS_DENIED_PATTERN.matcher(message).find()) {
+            log.info(">> [ACCESO DENEGADO] Intento fallido detectado");
+
+            accessAuditService.logAccessDenied(null, LocalDateTime.now());
+
+            log.info("   ✓ Acceso denegado registrado en BD");
         }
     }
 
@@ -106,7 +208,9 @@ public class FirebasePollingService {
                     .rfidUid(rfidUid)
                     .timestamp(LocalDateTime.now())
                     .build();
+
             smartAttendanceProcessor.processRfidEvent(request);
+
         } catch (Exception e) {
             log.error("Error procesando asistencia smart: {}", e.getMessage());
         }
