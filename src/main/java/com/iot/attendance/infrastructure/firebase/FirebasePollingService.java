@@ -149,32 +149,28 @@ public class FirebasePollingService {
 
             log.info(">> [ASISTENCIA] RFID detectado: {}", normalizedUid);
 
-            // CAPTURA DE TARJETA EN POOL
             Optional<RfidCardEntity> cardOpt = rfidCardRepository.findById(normalizedUid);
 
             if (cardOpt.isEmpty()) {
-                // NUEVA TARJETA
-                log.info("   -> Tarjeta NUEVA. Guardando en pool...");
-                RfidCardEntity newCard = RfidCardEntity.builder()
-                        .uid(normalizedUid)
-                        .worker(null)
-                        .lastSeen(LocalDateTime.now())
-                        .build();
-                rfidCardRepository.save(newCard);
-                log.info("   ✓ Tarjeta guardada en BD");
-            } else {
-                // TARJETA EXISTENTE
-                RfidCardEntity card = cardOpt.get();
-                card.setLastSeen(LocalDateTime.now());
-                rfidCardRepository.save(card);
+                log.warn("   ⚠ RFID NO REGISTRADO en el sistema: {}", normalizedUid);
+                log.warn("   → Esta tarjeta no está en el pool de las 5 tarjetas del sistema");
+                return;
+            }
 
-                if (card.getWorker() != null) {
-                    // TIENE DUEÑO -> Procesar Asistencia
-                    log.info("   -> Tarjeta asignada a trabajador. Procesando asistencia...");
-                    processCheckInCheckOut(normalizedUid);
-                } else {
-                    log.info("   -> Tarjeta en pool (sin dueño asignado)");
-                }
+            RfidCardEntity card = cardOpt.get();
+
+            // Actualizar último uso
+            card.setLastSeen(LocalDateTime.now());
+            rfidCardRepository.save(card);
+
+            if (card.getWorker() != null) {
+                // TIENE DUEÑO → Procesar Asistencia
+                log.info("   → Tarjeta asignada a Worker ID: {}. Procesando asistencia...",
+                        card.getWorker().getId());
+                processCheckInCheckOut(normalizedUid);
+            } else {
+                // SIN DUEÑO → Ignorar
+                log.info("   → Tarjeta en pool (sin trabajador asignado). Ignorando evento.");
             }
         }
     }

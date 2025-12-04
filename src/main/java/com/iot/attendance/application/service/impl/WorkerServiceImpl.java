@@ -265,17 +265,26 @@ public class WorkerServiceImpl implements WorkerService {
     public void deleteWorker(Long workerId) {
         WorkerEntity worker = findWorkerEntityById(workerId);
 
+        // Borrar huella del hardware
         if (worker.getFingerprintId() != null) {
-            log.info("Enviando comando BORRAR huella ID {} al hardware...", worker.getFingerprintId());
+            log.info(">> Enviando comando BORRAR huella ID {} al hardware", worker.getFingerprintId());
+
             firebaseService.setTargetFingerprintId(worker.getFingerprintId());
             firebaseService.setAdminCommand("BORRAR");
             firebaseService.setAdminState("BORRANDO_USUARIO");
+
+            try {
+                firebaseService.waitForDeletionComplete(10);
+            } catch (Exception e) {
+                log.error("Error esperando confirmación: {}", e.getMessage());
+            }
         }
 
+        // Liberar tarjetas RFID al pool
         if (worker.getRfidCards() != null && !worker.getRfidCards().isEmpty()) {
             List<RfidCardEntity> cardsToRelease = new ArrayList<>(worker.getRfidCards());
             for (RfidCardEntity card : cardsToRelease) {
-                log.info("Devolviendo tarjeta {} al pool de disponibles", card.getUid());
+                log.info(">> Devolviendo tarjeta {} al pool", card.getUid());
                 card.setWorker(null);
                 card.setUpdatedAt(LocalDateTime.now());
                 rfidCardRepository.save(card);
@@ -283,8 +292,9 @@ public class WorkerServiceImpl implements WorkerService {
             worker.getRfidCards().clear();
         }
 
+        //  Eliminar de base de datos
         workerRepository.delete(worker);
-        log.info("Trabajador ID {} eliminado de la base de datos.", workerId);
+        log.info("✓ Trabajador ID {} eliminado completamente", workerId);
     }
 
     @Override

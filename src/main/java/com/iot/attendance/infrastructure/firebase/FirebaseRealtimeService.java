@@ -60,6 +60,64 @@ public class FirebaseRealtimeService {
         setAdminCommand("REGISTRAR");
     }
 
+    public void clearTargetFingerprintId() {
+        String url = String.format("%s/admin/id_target.json", databaseUrl);
+        try {
+            restTemplate.delete(url);
+            log.info("✓ id_target eliminado de Firebase");
+        } catch (Exception e) {
+            log.error("Error limpiando id_target: {}", e.getMessage());
+        }
+    }
+
+    public void waitForDeletionComplete(int timeoutSeconds) {
+        log.info(">> Esperando confirmación de borrado (Timeout: {}s)...", timeoutSeconds);
+
+        long endTime = System.currentTimeMillis() + (timeoutSeconds * 1000);
+        String lastState = "";
+
+        while (System.currentTimeMillis() < endTime) {
+            try {
+                String currentState = getAdminStateSync();
+
+                if (currentState != null && !currentState.equals(lastState)) {
+                    log.info(">> Estado ESP32: {}", currentState);
+                    lastState = currentState;
+
+                    // Hardware confirma borrado exitoso
+                    if (currentState.contains("BORRADO EXITOSO") ||
+                            currentState.contains("BORRADO_EXITOSO") ||
+                            currentState.equals("LISTO")) {
+
+                        log.info("✓ Borrado confirmado por hardware");
+                        clearTargetFingerprintId();
+                        return;
+                    }
+
+                    // Hardware reporta error
+                    if (currentState.contains("ERROR") ||
+                            currentState.contains("FALLO") ||
+                            currentState.contains("BORRADO_FALLO")) {
+
+                        log.warn("⚠ Hardware reportó error en borrado: {}", currentState);
+                        clearTargetFingerprintId();
+                        throw new FirebaseException("Error en borrado: " + currentState);
+                    }
+                }
+
+                Thread.sleep(1000);
+
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new FirebaseException("Espera interrumpida", e);
+            }
+        }
+
+        // Timeout
+        log.warn("⚠ Timeout esperando confirmación de borrado, limpiando id_target...");
+        clearTargetFingerprintId();
+    }
+
     public Integer waitForNewFingerprintId(int timeoutSeconds) {
         log.info(">> Esperando a que el usuario registre su huella (Timeout: {}s)...", timeoutSeconds);
 

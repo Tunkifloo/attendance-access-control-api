@@ -27,4 +27,8 @@ public interface AttendanceService {
     AttendanceResponse getActiveAttendanceByWorker(Long workerId);
 
     long countLateAttendances(Long workerId, LocalDate startDate, LocalDate endDate);
+
+    AttendanceResponse getLatestAttendanceByWorker(Long workerId);
+
+    List<AttendanceResponse> getLatestAttendancesByWorker(Long workerId, int limit);
 }

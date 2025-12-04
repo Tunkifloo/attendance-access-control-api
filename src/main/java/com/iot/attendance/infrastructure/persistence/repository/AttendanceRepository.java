@@ -40,4 +40,10 @@ public interface AttendanceRepository extends JpaRepository<AttendanceEntity, Lo
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate
     );
+
+    @Query("SELECT a FROM AttendanceEntity a WHERE a.workerId = :workerId ORDER BY a.createdAt DESC LIMIT 1")
+    Optional<AttendanceEntity> findLatestByWorkerId(@Param("workerId") Long workerId);
+
+    @Query("SELECT a FROM AttendanceEntity a WHERE a.workerId = :workerId ORDER BY a.createdAt DESC")
+    List<AttendanceEntity> findLatestByWorkerIdOrderByCreatedAtDesc(@Param("workerId") Long workerId);
 }

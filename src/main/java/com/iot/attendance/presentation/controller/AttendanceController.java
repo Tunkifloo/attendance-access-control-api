@@ -122,4 +122,31 @@ public class AttendanceController {
                 count
         ));
     }
+
+    @GetMapping("/worker/{workerId}/latest")
+    @Operation(summary = "Obtener última asistencia del trabajador",
+            description = "Retorna el registro de asistencia más reciente del trabajador")
+    public ResponseEntity<ApiResponse<AttendanceResponse>> getLatestAttendance(
+            @Parameter(description = "ID del trabajador") @PathVariable Long workerId) {
+
+        log.info("Fetching latest attendance for worker: {}", workerId);
+        AttendanceResponse response = attendanceService.getLatestAttendanceByWorker(workerId);
+
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @GetMapping("/worker/{workerId}/recent")
+    @Operation(summary = "Obtener últimas N asistencias del trabajador",
+            description = "Retorna los últimos N registros de asistencia del trabajador")
+    public ResponseEntity<ApiResponse<List<AttendanceResponse>>> getRecentAttendances(
+            @Parameter(description = "ID del trabajador") @PathVariable Long workerId,
+            @Parameter(description = "Número de registros a retornar")
+            @RequestParam(defaultValue = "10") int limit) {
+
+        log.info("Fetching latest {} attendances for worker: {}", limit, workerId);
+        List<AttendanceResponse> responses = attendanceService
+                .getLatestAttendancesByWorker(workerId, limit);
+
+        return ResponseEntity.ok(ApiResponse.success(responses));
+    }
 }
