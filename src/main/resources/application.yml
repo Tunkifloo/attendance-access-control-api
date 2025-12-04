@@ -1,11 +1,13 @@
 spring:
   application:
+    version: "@project.version@"
     admin:
       enabled: false
     name: attendance-access-control-api
   jmx:
     enabled: false
-
+  main:
+    banner-mode: console
   profiles:
     active: dev
 
