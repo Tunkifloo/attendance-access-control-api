@@ -33,7 +33,7 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-@Transactional
+@Transactional(noRollbackFor = BusinessException.class)
 public class AttendanceServiceImpl implements AttendanceService {
 
     private final AttendanceRepository attendanceRepository;
@@ -53,19 +53,42 @@ public class AttendanceServiceImpl implements AttendanceService {
         String normalizedRfid = request.getRfidUid().toUpperCase().replace(" ", "").trim();
 
         RfidCardEntity card = rfidCardRepository.findById(normalizedRfid)
-                .orElseThrow(() -> new ResourceNotFoundException("RFID Tag not registered in system: " + normalizedRfid));
+                .orElseThrow(() -> new ResourceNotFoundException("RFID Tag not registered: " + normalizedRfid));
 
         WorkerEntity worker = card.getWorker();
         if (worker == null) {
-            throw new ResourceNotFoundException("RFID Tag exists but is not assigned to any worker");
+            throw new ResourceNotFoundException("RFID Tag unassigned");
         }
 
         SystemConfigurationEntity config = getCurrentConfiguration();
         LocalDateTime checkInTime = request.getTimestamp() != null ? request.getTimestamp() : getCurrentDateTime(config);
-        LocalDate attendanceDate = config.getSimulatedDate() != null && config.isSimulationMode() ? config.getSimulatedDate() : checkInTime.toLocalDate();
+
+        LocalTime nowTime = checkInTime.toLocalTime();
+        LocalTime workStart = config.getWorkStartTime();
+        LocalTime workEnd = config.getWorkEndTime();
+
+        LocalTime windowStart = workStart.minusMinutes(60);
+        LocalTime windowEnd = workEnd;
+
+        boolean isWindowCrossingMidnight = windowStart.isAfter(windowEnd);
+        boolean isWithinHours;
+
+        if (isWindowCrossingMidnight) {
+            isWithinHours = !nowTime.isBefore(windowStart) || !nowTime.isAfter(windowEnd);
+        } else {
+            isWithinHours = !nowTime.isBefore(windowStart) && !nowTime.isAfter(windowEnd);
+        }
+
+        if (!isWithinHours) {
+            log.warn("Check-in RECHAZADO: Hora {} fuera del rango permitido ({} - {})",
+                    nowTime, windowStart, windowEnd);
+            throw new BusinessException("Fuera de horario permitido para entrada.");
+        }
 
         attendanceRepository.findActiveAttendanceByWorkerId(worker.getId())
-                .ifPresent(existing -> { throw new BusinessException("Worker already has an active check-in for today"); });
+                .ifPresent(existing -> { throw new BusinessException("Worker already has an active check-in"); });
+
+        LocalDate attendanceDate = config.getSimulatedDate() != null && config.isSimulationMode() ? config.getSimulatedDate() : checkInTime.toLocalDate();
 
         AttendanceEntity entity = AttendanceEntity.builder()
                 .workerId(worker.getId())
@@ -79,8 +102,6 @@ public class AttendanceServiceImpl implements AttendanceService {
         calculateLateness(entity, config);
 
         AttendanceEntity saved = attendanceRepository.save(entity);
-        log.info("✓ Check-in recorded for {} (Late: {})", entity.getWorkerSnapshotName(), saved.isLate());
-
         return mapToResponse(saved, worker);
     }
 
@@ -90,15 +111,13 @@ public class AttendanceServiceImpl implements AttendanceService {
 
         String normalizedRfid = request.getRfidUid().toUpperCase().replace(" ", "").trim();
         RfidCardEntity card = rfidCardRepository.findById(normalizedRfid)
-                .orElseThrow(() -> new ResourceNotFoundException("RFID Tag not registered in system: " + normalizedRfid));
+                .orElseThrow(() -> new ResourceNotFoundException("RFID Tag not registered"));
 
         WorkerEntity worker = card.getWorker();
-        if (worker == null) {
-            throw new ResourceNotFoundException("RFID Tag exists but is not assigned to any worker");
-        }
+        if (worker == null) throw new ResourceNotFoundException("RFID Tag unassigned");
 
         AttendanceEntity entity = attendanceRepository.findActiveAttendanceByWorkerId(worker.getId())
-                .orElseThrow(() -> new BusinessException("No active check-in found for worker"));
+                .orElseThrow(() -> new BusinessException("No active check-in found"));
 
         SystemConfigurationEntity config = getCurrentConfiguration();
         LocalDateTime checkOutTime = request.getTimestamp() != null ? request.getTimestamp() : getCurrentDateTime(config);
@@ -109,22 +128,20 @@ public class AttendanceServiceImpl implements AttendanceService {
         entity.setUpdatedAt(LocalDateTime.now());
 
         AttendanceEntity updated = attendanceRepository.save(entity);
-        log.info("✓ Check-out recorded for {}", entity.getWorkerSnapshotName());
-
         return mapToResponse(updated, worker);
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<AttendanceResponse> getAttendanceHistory(LocalDate startDate, LocalDate endDate, String status, String sortDirection) {
-        log.info("Fetching attendance history | Start: {} | End: {} | Status: {} | Sort: {}", startDate, endDate, status, sortDirection);
-
         Sort sort = Sort.by("checkInTime");
-        if ("ASC".equalsIgnoreCase(sortDirection)) sort = sort.ascending();
-        else sort = sort.descending();
+        if ("ASC".equalsIgnoreCase(sortDirection)) {
+            sort = sort.ascending();
+        } else {
+            sort = sort.descending();
+        }
 
         List<AttendanceEntity> entities;
-
         if ("LATE".equalsIgnoreCase(status)) {
             entities = attendanceRepository.findByAttendanceDateBetweenAndIsLate(startDate, endDate, true, sort);
         } else if ("ON_TIME".equalsIgnoreCase(status)) {
@@ -132,14 +149,14 @@ public class AttendanceServiceImpl implements AttendanceService {
         } else {
             entities = attendanceRepository.findByAttendanceDateBetween(startDate, endDate, sort);
         }
-
         return mapToResponseList(entities);
     }
 
     @Override
     @Transactional(readOnly = true)
     public AttendanceResponse getAttendanceById(Long id) {
-        AttendanceEntity entity = attendanceRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Attendance not found: " + id));
+        AttendanceEntity entity = attendanceRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Attendance not found: " + id));
         WorkerEntity worker = entity.getWorkerId() != null ? workerRepository.findById(entity.getWorkerId()).orElse(null) : null;
         return mapToResponse(entity, worker);
     }
@@ -180,7 +197,8 @@ public class AttendanceServiceImpl implements AttendanceService {
     @Override
     @Transactional(readOnly = true)
     public AttendanceResponse getLatestAttendanceByWorker(Long workerId) {
-        AttendanceEntity entity = attendanceRepository.findLatestByWorkerId(workerId).orElseThrow(() -> new ResourceNotFoundException("No attendance records"));
+        AttendanceEntity entity = attendanceRepository.findLatestByWorkerId(workerId)
+                .orElseThrow(() -> new ResourceNotFoundException("No attendance records found"));
         WorkerEntity worker = workerRepository.findById(workerId).orElse(null);
         return mapToResponse(entity, worker);
     }
@@ -188,22 +206,20 @@ public class AttendanceServiceImpl implements AttendanceService {
     @Override
     @Transactional(readOnly = true)
     public List<AttendanceResponse> getLatestAttendancesByWorker(Long workerId, int limit) {
-        return mapToResponseList(attendanceRepository.findLatestByWorkerIdOrderByCreatedAtDesc(workerId).stream().limit(limit).collect(Collectors.toList()));
+        return mapToResponseList(attendanceRepository.findLatestByWorkerIdOrderByCreatedAtDesc(workerId)
+                .stream().limit(limit).collect(Collectors.toList()));
     }
-
-    // --- HELPERS ---
 
     private void calculateLateness(AttendanceEntity entity, SystemConfigurationEntity config) {
         LocalDateTime checkInTime = entity.getCheckInTime();
         LocalDate attendanceDate = entity.getAttendanceDate();
         LocalTime workStartTime = config.getWorkStartTime();
         LocalTime workEndTime = config.getWorkEndTime();
+
         int toleranceMinutes = config.getLateThresholdMinutes() != null ? config.getLateThresholdMinutes() : 0;
 
-        boolean isNightShift = workStartTime.isAfter(workEndTime);
         LocalDateTime workStartDateTime;
-
-        if (isNightShift) {
+        if (workStartTime.isAfter(workEndTime)) {
             if (checkInTime.toLocalTime().isBefore(workEndTime)) {
                 workStartDateTime = attendanceDate.minusDays(1).atTime(workStartTime);
             } else {
@@ -225,7 +241,8 @@ public class AttendanceServiceImpl implements AttendanceService {
     }
 
     private SystemConfigurationEntity getCurrentConfiguration() {
-        return configRepository.findLatestConfiguration().orElseThrow(() -> new BusinessException("System configuration not found."));
+        return configRepository.findLatestConfiguration()
+                .orElseThrow(() -> new BusinessException("System configuration not found"));
     }
 
     private LocalDateTime getCurrentDateTime(SystemConfigurationEntity config) {
@@ -273,7 +290,9 @@ public class AttendanceServiceImpl implements AttendanceService {
         long hours = duration.toHours();
         long minutes = duration.toMinutes() % 60;
         long seconds = duration.getSeconds() % 60;
-        if (hours == 0) return minutes == 0 ? String.format("%ds", seconds) : String.format("%dm %ds", minutes, seconds);
+        if (hours == 0) {
+            return minutes == 0 ? String.format("%ds", seconds) : String.format("%dm %ds", minutes, seconds);
+        }
         return String.format("%dh %dm %ds", hours, minutes, seconds);
     }
 }

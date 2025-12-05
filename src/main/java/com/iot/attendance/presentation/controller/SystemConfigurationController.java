@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.*;
 public class SystemConfigurationController {
 
     private final SystemConfigurationService configService;
+    private final JdbcTemplate jdbcTemplate;
 
     @GetMapping
     @Operation(summary = "Obtener configuración actual del sistema")
@@ -59,18 +61,12 @@ public class SystemConfigurationController {
     }
 
     @PostMapping("/simulation/enable")
-    @Operation(summary = "Habilitar modo simulación",
-            description = "Activa el modo simulación para manipular fecha/hora del sistema")
+    @Operation(summary = "Habilitar modo simulación")
     public ResponseEntity<ApiResponse<SystemConfigurationResponse>> enableSimulation(
             @Valid @RequestBody UpdateSystemConfigRequest request) {
-
         log.info("Enabling simulation mode");
         SystemConfigurationResponse response = configService.enableSimulationMode(request);
-
-        return ResponseEntity.ok(ApiResponse.success(
-                "Simulation mode enabled",
-                response
-        ));
+        return ResponseEntity.ok(ApiResponse.success("Simulation mode enabled", response));
     }
 
     @PostMapping("/simulation/disable")
@@ -78,10 +74,16 @@ public class SystemConfigurationController {
     public ResponseEntity<ApiResponse<SystemConfigurationResponse>> disableSimulation() {
         log.info("Disabling simulation mode");
         SystemConfigurationResponse response = configService.disableSimulationMode();
+        return ResponseEntity.ok(ApiResponse.success("Simulation mode disabled", response));
+    }
 
-        return ResponseEntity.ok(ApiResponse.success(
-                "Simulation mode disabled",
-                response
-        ));
+    @DeleteMapping("/purge-history")
+    @Operation(summary = "PURGAR HISTORIAL", description = "Borra todos los logs de acceso y asistencias. Mantiene usuarios.")
+    public ResponseEntity<ApiResponse<Void>> purgeHistory() {
+        log.warn("PURGING ALL HISTORY DATA REQUESTED");
+
+        jdbcTemplate.execute("TRUNCATE TABLE access_logs, attendances RESTART IDENTITY");
+
+        return ResponseEntity.ok(ApiResponse.success("Historial eliminado correctamente", null));
     }
 }
