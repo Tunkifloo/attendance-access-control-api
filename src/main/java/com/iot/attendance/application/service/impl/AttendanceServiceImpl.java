@@ -69,7 +69,7 @@ public class AttendanceServiceImpl implements AttendanceService {
 
         AttendanceEntity entity = AttendanceEntity.builder()
                 .workerId(worker.getId())
-                .workerSnapshotName(worker.getFirstName() + " " + worker.getLastName()) // GUARDA SNAPSHOT AL CREAR
+                .workerSnapshotName(worker.getFirstName() + " " + worker.getLastName())
                 .rfidTag(normalizedRfid)
                 .attendanceDate(attendanceDate)
                 .checkInTime(checkInTime)
@@ -140,7 +140,6 @@ public class AttendanceServiceImpl implements AttendanceService {
     @Transactional(readOnly = true)
     public AttendanceResponse getAttendanceById(Long id) {
         AttendanceEntity entity = attendanceRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Attendance not found: " + id));
-        // Intento buscar worker, si es null (borrado), paso null
         WorkerEntity worker = entity.getWorkerId() != null ? workerRepository.findById(entity.getWorkerId()).orElse(null) : null;
         return mapToResponse(entity, worker);
     }
@@ -238,20 +237,15 @@ public class AttendanceServiceImpl implements AttendanceService {
 
     private AttendanceResponse mapToResponse(AttendanceEntity entity, WorkerEntity worker) {
         String workerFullName = "Desconocido";
-
-        // LÓGICA DE SNAPSHOT:
-        // 1. Si existe un objeto Worker vivo, usamos sus datos actuales.
         if (worker != null) {
             workerFullName = worker.getFirstName() + " " + worker.getLastName();
-        }
-        // 2. Si no (fue borrado), usamos el snapshot guardado en la entidad de asistencia.
-        else if (entity.getWorkerSnapshotName() != null) {
+        } else if (entity.getWorkerSnapshotName() != null) {
             workerFullName = entity.getWorkerSnapshotName() + " (Eliminado)";
         }
 
         return AttendanceResponse.builder()
                 .id(entity.getId())
-                .workerId(entity.getWorkerId()) // Será null si fue borrado
+                .workerId(entity.getWorkerId())
                 .workerFullName(workerFullName)
                 .rfidTag(entity.getRfidTag())
                 .attendanceDate(entity.getAttendanceDate())
@@ -260,7 +254,7 @@ public class AttendanceServiceImpl implements AttendanceService {
                 .workedDuration(formatDuration(entity.getWorkedDuration()))
                 .isLate(entity.isLate())
                 .latenessDuration(formatDuration(entity.getLatenessDuration()))
-                .status(entity.getStatus())
+                .status(entity.getStatus().name())
                 .createdAt(entity.getCreatedAt())
                 .build();
     }

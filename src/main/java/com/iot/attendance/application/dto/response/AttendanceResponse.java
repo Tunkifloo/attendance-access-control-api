@@ -1,7 +1,7 @@
 package com.iot.attendance.application.dto.response;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
-import com.iot.attendance.domain.enums.AttendanceStatus;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -31,9 +31,12 @@ public class AttendanceResponse {
     private LocalDateTime checkOutTime;
 
     private String workedDuration;
+
+    @JsonProperty("isLate")
     private boolean isLate;
+
     private String latenessDuration;
-    private AttendanceStatus status;
+    private String status;
 
     @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime createdAt;
