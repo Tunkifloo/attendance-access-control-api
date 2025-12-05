@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iot.attendance.application.dto.request.RfidAttendanceRequest;
 import com.iot.attendance.application.service.AccessAuditService;
+import com.iot.attendance.application.service.SecurityService;
 import com.iot.attendance.application.service.impl.SmartAttendanceProcessor;
 import com.iot.attendance.infrastructure.persistence.entity.RfidCardEntity;
 import com.iot.attendance.infrastructure.persistence.repository.RfidCardRepository;
@@ -33,13 +34,12 @@ public class FirebasePollingService {
     private final RfidCardRepository rfidCardRepository;
     private final SmartAttendanceProcessor smartAttendanceProcessor;
     private final AccessAuditService accessAuditService;
+    private final SecurityService securityService;
 
-    // Patrones de regex
     private static final Pattern RFID_PATTERN = Pattern.compile("Marcaje RFID: ([A-F0-9 ]+)");
     private static final Pattern ACCESS_GRANTED_PATTERN = Pattern.compile("Puerta abierta ID: (\\d+)");
-    private static final Pattern ACCESS_DENIED_PATTERN = Pattern.compile("Intento fallido huella");
+    private static final Pattern ACCESS_DENIED_PATTERN = Pattern.compile("Intento fallido huella|Huella desconocida");
 
-    // Sets para evitar procesar duplicados
     private final Set<String> processedAttendanceKeys = Collections.synchronizedSet(new HashSet<>());
     private final Set<String> processedAccessKeys = Collections.synchronizedSet(new HashSet<>());
     private final Set<String> processedSecurityKeys = Collections.synchronizedSet(new HashSet<>());
@@ -47,9 +47,7 @@ public class FirebasePollingService {
     @Scheduled(fixedRate = 3000)
     public void pollRecentAttendance() {
         try {
-            String url = String.format("%s/logs/asistencia.json?orderBy=\"$key\"&limitToLast=5",
-                    databaseUrl);
-
+            String url = String.format("%s/logs/asistencia.json?orderBy=\"$key\"&limitToLast=5", databaseUrl);
             String response = restTemplate.getForObject(url, String.class);
             if (response == null || response.equals("null")) return;
 
@@ -64,25 +62,18 @@ public class FirebasePollingService {
                 if (!processedAttendanceKeys.contains(key)) {
                     processAttendanceMessage(message);
                     processedAttendanceKeys.add(key);
-
-                    // Limpieza de memoria
-                    if (processedAttendanceKeys.size() > 1000) {
-                        processedAttendanceKeys.clear();
-                    }
+                    if (processedAttendanceKeys.size() > 1000) processedAttendanceKeys.clear();
                 }
             }
-
         } catch (Exception e) {
-            log.error("Error en polling de asistencia: {}", e.getMessage());
+            log.error("Error polling asistencia: {}", e.getMessage());
         }
     }
 
     @Scheduled(fixedRate = 3000)
     public void pollAccessLogs() {
         try {
-            String url = String.format("%s/logs/accesos.json?orderBy=\"$key\"&limitToLast=5",
-                    databaseUrl);
-
+            String url = String.format("%s/logs/accesos.json?orderBy=\"$key\"&limitToLast=5", databaseUrl);
             String response = restTemplate.getForObject(url, String.class);
             if (response == null || response.equals("null")) return;
 
@@ -97,24 +88,18 @@ public class FirebasePollingService {
                 if (!processedAccessKeys.contains(key)) {
                     processAccessGrantedMessage(message);
                     processedAccessKeys.add(key);
-
-                    if (processedAccessKeys.size() > 1000) {
-                        processedAccessKeys.clear();
-                    }
+                    if (processedAccessKeys.size() > 1000) processedAccessKeys.clear();
                 }
             }
-
         } catch (Exception e) {
-            log.error("Error en polling de accesos: {}", e.getMessage());
+            log.error("Error polling accesos: {}", e.getMessage());
         }
     }
 
     @Scheduled(fixedRate = 3000)
     public void pollSecurityLogs() {
         try {
-            String url = String.format("%s/logs/seguridad.json?orderBy=\"$key\"&limitToLast=5",
-                    databaseUrl);
-
+            String url = String.format("%s/logs/seguridad.json?orderBy=\"$key\"&limitToLast=5", databaseUrl);
             String response = restTemplate.getForObject(url, String.class);
             if (response == null || response.equals("null")) return;
 
@@ -129,15 +114,11 @@ public class FirebasePollingService {
                 if (!processedSecurityKeys.contains(key)) {
                     processAccessDeniedMessage(message);
                     processedSecurityKeys.add(key);
-
-                    if (processedSecurityKeys.size() > 1000) {
-                        processedSecurityKeys.clear();
-                    }
+                    if (processedSecurityKeys.size() > 1000) processedSecurityKeys.clear();
                 }
             }
-
         } catch (Exception e) {
-            log.error("Error en polling de seguridad: {}", e.getMessage());
+            log.error("Error polling seguridad: {}", e.getMessage());
         }
     }
 
@@ -146,31 +127,21 @@ public class FirebasePollingService {
         if (matcher.find()) {
             String rawUid = matcher.group(1);
             String normalizedUid = rawUid.toUpperCase().replace(" ", "").trim();
-
-            log.info(">> [ASISTENCIA] RFID detectado: {}", normalizedUid);
-
             Optional<RfidCardEntity> cardOpt = rfidCardRepository.findById(normalizedUid);
 
             if (cardOpt.isEmpty()) {
-                log.warn("   ⚠ RFID NO REGISTRADO en el sistema: {}", normalizedUid);
-                log.warn("   → Esta tarjeta no está en el pool de las 5 tarjetas del sistema");
+                log.warn("⚠ RFID NO REGISTRADO: {}", normalizedUid);
+                // USAMOS SEVERITY COMO "ATTENDANCE"
+                securityService.logSecurityEvent("UNKNOWN_RFID", "Tarjeta desconocida: " + normalizedUid, "ATTENDANCE");
                 return;
             }
 
             RfidCardEntity card = cardOpt.get();
-
-            // Actualizar último uso
             card.setLastSeen(LocalDateTime.now());
             rfidCardRepository.save(card);
 
             if (card.getWorker() != null) {
-                // TIENE DUEÑO → Procesar Asistencia
-                log.info("   → Tarjeta asignada a Worker ID: {}. Procesando asistencia...",
-                        card.getWorker().getId());
                 processCheckInCheckOut(normalizedUid);
-            } else {
-                // SIN DUEÑO → Ignorar
-                log.info("   → Tarjeta en pool (sin trabajador asignado). Ignorando evento.");
             }
         }
     }
@@ -178,37 +149,26 @@ public class FirebasePollingService {
     private void processAccessGrantedMessage(String message) {
         Matcher matcher = ACCESS_GRANTED_PATTERN.matcher(message);
         if (matcher.find()) {
-            Integer fingerprintId = Integer.parseInt(matcher.group(1));
-
-            log.info(">> [ACCESO CONCEDIDO] Huella ID: {}", fingerprintId);
-
-            accessAuditService.logAccessGranted(fingerprintId, LocalDateTime.now());
-
-            log.info("   ✓ Acceso concedido registrado en BD");
+            accessAuditService.logAccessGranted(Integer.parseInt(matcher.group(1)), LocalDateTime.now());
         }
     }
 
     private void processAccessDeniedMessage(String message) {
         if (ACCESS_DENIED_PATTERN.matcher(message).find()) {
-            log.info(">> [ACCESO DENEGADO] Intento fallido detectado");
-
+            log.info(">> [ACCESO DENEGADO]");
             accessAuditService.logAccessDenied(null, LocalDateTime.now());
-
-            log.info("   ✓ Acceso denegado registrado en BD");
+            // USAMOS SEVERITY COMO "ACCESS"
+            securityService.logSecurityEvent("ACCESS_DENIED", "Huella no reconocida", "ACCESS");
         }
     }
 
     private void processCheckInCheckOut(String rfidUid) {
         try {
             RfidAttendanceRequest request = RfidAttendanceRequest.builder()
-                    .rfidUid(rfidUid)
-                    .timestamp(LocalDateTime.now())
-                    .build();
-
+                    .rfidUid(rfidUid).timestamp(LocalDateTime.now()).build();
             smartAttendanceProcessor.processRfidEvent(request);
-
         } catch (Exception e) {
-            log.error("Error procesando asistencia smart: {}", e.getMessage());
+            log.error("Error procesando asistencia: {}", e.getMessage());
         }
     }
 }

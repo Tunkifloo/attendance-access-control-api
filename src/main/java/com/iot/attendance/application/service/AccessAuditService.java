@@ -14,7 +14,9 @@ public interface AccessAuditService {
 
     List<AccessLogResponse> getAccessHistoryByTimeRange(
             LocalDateTime startTime,
-            LocalDateTime endTime
+            LocalDateTime endTime,
+            String status,
+            String sortDirection
     );
 
     List<AccessLogResponse> getRecentDeniedAccess(int hours);

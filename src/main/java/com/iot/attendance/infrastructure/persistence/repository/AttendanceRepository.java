@@ -2,6 +2,7 @@ package com.iot.attendance.infrastructure.persistence.repository;
 
 import com.iot.attendance.domain.enums.AttendanceStatus;
 import com.iot.attendance.infrastructure.persistence.entity.AttendanceEntity;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -30,6 +31,10 @@ public interface AttendanceRepository extends JpaRepository<AttendanceEntity, Lo
 
     @Query("SELECT a FROM AttendanceEntity a WHERE a.attendanceDate = :date AND a.isLate = true")
     List<AttendanceEntity> findLateAttendancesByDate(@Param("date") LocalDate date);
+
+    List<AttendanceEntity> findByAttendanceDateBetween(LocalDate startDate, LocalDate endDate, Sort sort);
+
+    List<AttendanceEntity> findByAttendanceDateBetweenAndIsLate(LocalDate startDate, LocalDate endDate, boolean isLate, Sort sort);
 
     @Query("SELECT a FROM AttendanceEntity a WHERE a.workerId = :workerId AND a.status = 'CHECKED_IN'")
     Optional<AttendanceEntity> findActiveAttendanceByWorkerId(@Param("workerId") Long workerId);

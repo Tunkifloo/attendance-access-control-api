@@ -27,8 +27,11 @@ public class AttendanceEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "worker_id", nullable = false)
+    @Column(name = "worker_id", nullable = true)
     private Long workerId;
+
+    @Column(name = "worker_snapshot_name", length = 200)
+    private String workerSnapshotName;
 
     @Column(name = "rfid_tag", nullable = false, length = 50)
     private String rfidTag;

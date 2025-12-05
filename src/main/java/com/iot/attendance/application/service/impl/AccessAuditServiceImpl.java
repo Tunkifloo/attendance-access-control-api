@@ -10,6 +10,7 @@ import com.iot.attendance.infrastructure.persistence.repository.WorkerRepository
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,65 +33,65 @@ public class AccessAuditServiceImpl implements AccessAuditService {
     @Override
     public void logAccessGranted(Integer fingerprintId, LocalDateTime timestamp) {
         log.info("Logging access GRANTED for fingerprint ID: {}", fingerprintId);
-
         Optional<WorkerEntity> workerOpt = workerRepository.findByFingerprintId(fingerprintId);
 
         AccessLogEntity entity = AccessLogEntity.builder()
                 .workerId(workerOpt.map(WorkerEntity::getId).orElse(null))
+                .workerSnapshotName(workerOpt.map(w -> w.getFirstName() + " " + w.getLastName()).orElse(null))
                 .fingerprintId(fingerprintId)
                 .accessGranted(true)
-                .location("Área Restringida")
+                .location("Puerta Principal")
+                .status("GRANTED")
                 .accessTime(timestamp)
                 .build();
 
         accessLogRepository.save(entity);
-
-        if (workerOpt.isPresent()) {
-            log.info("✓ Access granted logged for worker: {} ({})",
-                    workerOpt.get().getFirstName(),
-                    workerOpt.get().getDocumentNumber());
-        } else {
-            log.warn("⚠ Access granted logged but fingerprint {} not linked to any worker",
-                    fingerprintId);
-        }
     }
 
     @Override
     public void logAccessDenied(Integer fingerprintId, LocalDateTime timestamp) {
         log.info("Logging access DENIED for fingerprint ID: {}", fingerprintId);
+        String workerName = null;
+        if (fingerprintId != null) {
+            workerName = workerRepository.findByFingerprintId(fingerprintId)
+                    .map(w -> w.getFirstName() + " " + w.getLastName())
+                    .orElse(null);
+        }
 
         AccessLogEntity entity = AccessLogEntity.builder()
                 .workerId(null)
+                .workerSnapshotName(workerName)
                 .fingerprintId(fingerprintId)
                 .accessGranted(false)
-                .location("Área Restringida")
+                .location("Puerta Principal")
+                .status("DENIED")
                 .accessTime(timestamp)
                 .build();
 
         accessLogRepository.save(entity);
-        log.info("✓ Access denied logged");
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<AccessLogResponse> getAccessHistoryByWorker(Long workerId) {
-        log.info("Fetching access history for worker: {}", workerId);
-
-        List<AccessLogEntity> entities = accessLogRepository
-                .findByWorkerIdOrderByAccessTimeDesc(workerId);
-
-        return mapToResponseList(entities);
+        return mapToResponseList(accessLogRepository.findByWorkerIdOrderByAccessTimeDesc(workerId));
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<AccessLogResponse> getAccessHistoryByTimeRange(
-            LocalDateTime startTime, LocalDateTime endTime) {
+            LocalDateTime startTime, LocalDateTime endTime, String status, String sortDirection) {
 
-        log.info("Fetching access history from {} to {}", startTime, endTime);
+        Sort sort = Sort.by("accessTime");
+        if ("ASC".equalsIgnoreCase(sortDirection)) sort = sort.ascending();
+        else sort = sort.descending();
 
-        List<AccessLogEntity> entities = accessLogRepository
-                .findByAccessTimeBetween(startTime, endTime);
+        List<AccessLogEntity> entities;
+        if (status != null && !status.isEmpty() && !status.equals("ALL")) {
+            entities = accessLogRepository.findByAccessTimeBetweenAndStatus(startTime, endTime, status, sort);
+        } else {
+            entities = accessLogRepository.findByAccessTimeBetween(startTime, endTime, sort);
+        }
 
         return mapToResponseList(entities);
     }
@@ -98,52 +99,42 @@ public class AccessAuditServiceImpl implements AccessAuditService {
     @Override
     @Transactional(readOnly = true)
     public List<AccessLogResponse> getRecentDeniedAccess(int hours) {
-        log.info("Fetching denied accesses from last {} hours", hours);
-
         LocalDateTime since = LocalDateTime.now().minusHours(hours);
-        List<AccessLogEntity> entities = accessLogRepository
-                .findRecentDeniedAccess(since);
-
-        return mapToResponseList(entities);
+        return mapToResponseList(accessLogRepository.findRecentDeniedAccess(since));
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<AccessLogResponse> getRecentGrantedAccess(int hours) {
-        log.info("Fetching granted accesses from last {} hours", hours);
-
         LocalDateTime since = LocalDateTime.now().minusHours(hours);
-        List<AccessLogEntity> entities = accessLogRepository
-                .findRecentGrantedAccess(since);
-
-        return mapToResponseList(entities);
+        return mapToResponseList(accessLogRepository.findRecentGrantedAccess(since));
     }
 
     @Override
     @Transactional(readOnly = true)
     public long countDeniedAccessesByWorker(Long workerId, LocalDateTime startTime, LocalDateTime endTime) {
-        log.info("Counting denied accesses for worker {} from {} to {}",
-                workerId, startTime, endTime);
-
         return accessLogRepository.countDeniedAccessesByWorker(workerId, startTime, endTime);
     }
 
     private List<AccessLogResponse> mapToResponseList(List<AccessLogEntity> entities) {
-        return entities.stream()
-                .map(entity -> {
-                    WorkerEntity worker = null;
-                    if (entity.getWorkerId() != null) {
-                        worker = workerRepository.findById(entity.getWorkerId()).orElse(null);
-                    }
-                    return mapToResponse(entity, worker);
-                })
-                .collect(Collectors.toList());
+        return entities.stream().map(this::mapToResponse).collect(Collectors.toList());
     }
 
-    private AccessLogResponse mapToResponse(AccessLogEntity entity, WorkerEntity worker) {
-        String workerName = (worker != null)
-                ? worker.getFirstName() + " " + worker.getLastName()
-                : "Desconocido";
+    private AccessLogResponse mapToResponse(AccessLogEntity entity) {
+        String workerName = "Desconocido";
+
+        if (entity.getWorkerId() != null) {
+            Optional<WorkerEntity> w = workerRepository.findById(entity.getWorkerId());
+            if (w.isPresent()) {
+                workerName = w.get().getFirstName() + " " + w.get().getLastName();
+            } else if (entity.getWorkerSnapshotName() != null) {
+                // Si tiene ID pero no está en DB (inconsistencia rara), usar snapshot
+                workerName = entity.getWorkerSnapshotName() + " (Eliminado)";
+            }
+        }
+        else if (entity.getWorkerSnapshotName() != null) {
+            workerName = entity.getWorkerSnapshotName() + " (Eliminado)";
+        }
 
         return AccessLogResponse.builder()
                 .id(entity.getId())
@@ -152,6 +143,7 @@ public class AccessAuditServiceImpl implements AccessAuditService {
                 .fingerprintId(entity.getFingerprintId())
                 .accessGranted(entity.isAccessGranted())
                 .location(entity.getLocation())
+                .status(entity.getStatus())
                 .accessTime(entity.getAccessTime())
                 .createdAt(entity.getCreatedAt())
                 .build();

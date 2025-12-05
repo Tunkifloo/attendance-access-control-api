@@ -19,6 +19,7 @@ import com.iot.attendance.infrastructure.persistence.repository.WorkerRepository
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -52,9 +53,7 @@ public class AttendanceServiceImpl implements AttendanceService {
         String normalizedRfid = request.getRfidUid().toUpperCase().replace(" ", "").trim();
 
         RfidCardEntity card = rfidCardRepository.findById(normalizedRfid)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "RFID Tag not registered in system: " + normalizedRfid
-                ));
+                .orElseThrow(() -> new ResourceNotFoundException("RFID Tag not registered in system: " + normalizedRfid));
 
         WorkerEntity worker = card.getWorker();
         if (worker == null) {
@@ -62,21 +61,15 @@ public class AttendanceServiceImpl implements AttendanceService {
         }
 
         SystemConfigurationEntity config = getCurrentConfiguration();
-        LocalDateTime checkInTime = request.getTimestamp() != null ?
-                request.getTimestamp() : getCurrentDateTime(config);
-        LocalDate attendanceDate = config.getSimulatedDate() != null && config.isSimulationMode()
-                ? config.getSimulatedDate()
-                : checkInTime.toLocalDate();
+        LocalDateTime checkInTime = request.getTimestamp() != null ? request.getTimestamp() : getCurrentDateTime(config);
+        LocalDate attendanceDate = config.getSimulatedDate() != null && config.isSimulationMode() ? config.getSimulatedDate() : checkInTime.toLocalDate();
 
         attendanceRepository.findActiveAttendanceByWorkerId(worker.getId())
-                .ifPresent(existing -> {
-                    throw new BusinessException(
-                            "Worker already has an active check-in for today"
-                    );
-                });
+                .ifPresent(existing -> { throw new BusinessException("Worker already has an active check-in for today"); });
 
         AttendanceEntity entity = AttendanceEntity.builder()
                 .workerId(worker.getId())
+                .workerSnapshotName(worker.getFirstName() + " " + worker.getLastName()) // GUARDA SNAPSHOT AL CREAR
                 .rfidTag(normalizedRfid)
                 .attendanceDate(attendanceDate)
                 .checkInTime(checkInTime)
@@ -86,13 +79,7 @@ public class AttendanceServiceImpl implements AttendanceService {
         calculateLateness(entity, config);
 
         AttendanceEntity saved = attendanceRepository.save(entity);
-
-        log.info("✓ Check-in recorded for worker {} ({}) at {} | Late: {} | Duration: {}",
-                worker.getId(),
-                worker.getFirstName() + " " + worker.getLastName(),
-                checkInTime.toLocalTime(),
-                saved.isLate() ? "YES" : "NO",
-                saved.isLate() ? formatDuration(saved.getLatenessDuration()) : "N/A");
+        log.info("✓ Check-in recorded for {} (Late: {})", entity.getWorkerSnapshotName(), saved.isLate());
 
         return mapToResponse(saved, worker);
     }
@@ -102,11 +89,8 @@ public class AttendanceServiceImpl implements AttendanceService {
         log.info("Recording check-out for RFID: {}", request.getRfidUid());
 
         String normalizedRfid = request.getRfidUid().toUpperCase().replace(" ", "").trim();
-
         RfidCardEntity card = rfidCardRepository.findById(normalizedRfid)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "RFID Tag not registered in system: " + normalizedRfid
-                ));
+                .orElseThrow(() -> new ResourceNotFoundException("RFID Tag not registered in system: " + normalizedRfid));
 
         WorkerEntity worker = card.getWorker();
         if (worker == null) {
@@ -114,86 +98,77 @@ public class AttendanceServiceImpl implements AttendanceService {
         }
 
         AttendanceEntity entity = attendanceRepository.findActiveAttendanceByWorkerId(worker.getId())
-                .orElseThrow(() -> new BusinessException(
-                        "No active check-in found for worker"
-                ));
+                .orElseThrow(() -> new BusinessException("No active check-in found for worker"));
 
         SystemConfigurationEntity config = getCurrentConfiguration();
-        LocalDateTime checkOutTime = request.getTimestamp() != null ?
-                request.getTimestamp() : getCurrentDateTime(config);
+        LocalDateTime checkOutTime = request.getTimestamp() != null ? request.getTimestamp() : getCurrentDateTime(config);
 
         entity.setCheckOutTime(checkOutTime);
         entity.setStatus(AttendanceStatus.CHECKED_OUT);
-
-        Duration workedDuration = Duration.between(entity.getCheckInTime(), checkOutTime);
-        entity.setWorkedDuration(workedDuration);
+        entity.setWorkedDuration(Duration.between(entity.getCheckInTime(), checkOutTime));
         entity.setUpdatedAt(LocalDateTime.now());
 
         AttendanceEntity updated = attendanceRepository.save(entity);
-
-        log.info("✓ Check-out recorded for worker {} ({}) at {} | Worked: {}",
-                worker.getId(),
-                worker.getFirstName() + " " + worker.getLastName(),
-                checkOutTime.toLocalTime(),
-                formatDuration(workedDuration));
+        log.info("✓ Check-out recorded for {}", entity.getWorkerSnapshotName());
 
         return mapToResponse(updated, worker);
     }
 
     @Override
     @Transactional(readOnly = true)
+    public List<AttendanceResponse> getAttendanceHistory(LocalDate startDate, LocalDate endDate, String status, String sortDirection) {
+        log.info("Fetching attendance history | Start: {} | End: {} | Status: {} | Sort: {}", startDate, endDate, status, sortDirection);
+
+        Sort sort = Sort.by("checkInTime");
+        if ("ASC".equalsIgnoreCase(sortDirection)) sort = sort.ascending();
+        else sort = sort.descending();
+
+        List<AttendanceEntity> entities;
+
+        if ("LATE".equalsIgnoreCase(status)) {
+            entities = attendanceRepository.findByAttendanceDateBetweenAndIsLate(startDate, endDate, true, sort);
+        } else if ("ON_TIME".equalsIgnoreCase(status)) {
+            entities = attendanceRepository.findByAttendanceDateBetweenAndIsLate(startDate, endDate, false, sort);
+        } else {
+            entities = attendanceRepository.findByAttendanceDateBetween(startDate, endDate, sort);
+        }
+
+        return mapToResponseList(entities);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public AttendanceResponse getAttendanceById(Long id) {
-        AttendanceEntity entity = attendanceRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Attendance not found with ID: " + id
-                ));
-
-        WorkerEntity worker = workerRepository.findById(entity.getWorkerId())
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Worker not found with ID: " + entity.getWorkerId()
-                ));
-
+        AttendanceEntity entity = attendanceRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Attendance not found: " + id));
+        // Intento buscar worker, si es null (borrado), paso null
+        WorkerEntity worker = entity.getWorkerId() != null ? workerRepository.findById(entity.getWorkerId()).orElse(null) : null;
         return mapToResponse(entity, worker);
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<AttendanceResponse> getAttendanceByDate(LocalDate date) {
-        List<AttendanceEntity> entities = attendanceRepository.findByAttendanceDate(date);
-        return mapToResponseList(entities);
+        return mapToResponseList(attendanceRepository.findByAttendanceDate(date));
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<AttendanceResponse> getAttendanceByWorkerAndDateRange(
-            Long workerId, LocalDate startDate, LocalDate endDate) {
-
-        List<AttendanceEntity> entities = attendanceRepository
-                .findByWorkerIdAndAttendanceDateBetween(workerId, startDate, endDate);
-
-        return mapToResponseList(entities);
+    public List<AttendanceResponse> getAttendanceByWorkerAndDateRange(Long workerId, LocalDate startDate, LocalDate endDate) {
+        return mapToResponseList(attendanceRepository.findByWorkerIdAndAttendanceDateBetween(workerId, startDate, endDate));
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<AttendanceResponse> getLateAttendancesByDate(LocalDate date) {
-        List<AttendanceEntity> entities = attendanceRepository.findLateAttendancesByDate(date);
-        return mapToResponseList(entities);
+        return mapToResponseList(attendanceRepository.findLateAttendancesByDate(date));
     }
 
     @Override
     @Transactional(readOnly = true)
     public AttendanceResponse getActiveAttendanceByWorker(Long workerId) {
         AttendanceEntity entity = attendanceRepository.findActiveAttendanceByWorkerId(workerId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "No active attendance found for worker: " + workerId
-                ));
-
-        WorkerEntity worker = workerRepository.findById(workerId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Worker not found with ID: " + workerId
-                ));
-
+                .orElseThrow(() -> new ResourceNotFoundException("No active attendance found"));
+        WorkerEntity worker = workerRepository.findById(workerId).orElse(null);
         return mapToResponse(entity, worker);
     }
 
@@ -206,116 +181,77 @@ public class AttendanceServiceImpl implements AttendanceService {
     @Override
     @Transactional(readOnly = true)
     public AttendanceResponse getLatestAttendanceByWorker(Long workerId) {
-        log.info("Fetching latest attendance for worker: {}", workerId);
-
-        AttendanceEntity entity = attendanceRepository.findLatestByWorkerId(workerId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "No attendance records found for worker: " + workerId
-                ));
-
-        WorkerEntity worker = workerRepository.findById(workerId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Worker not found with ID: " + workerId
-                ));
-
+        AttendanceEntity entity = attendanceRepository.findLatestByWorkerId(workerId).orElseThrow(() -> new ResourceNotFoundException("No attendance records"));
+        WorkerEntity worker = workerRepository.findById(workerId).orElse(null);
         return mapToResponse(entity, worker);
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<AttendanceResponse> getLatestAttendancesByWorker(Long workerId, int limit) {
-        log.info("Fetching latest {} attendances for worker: {}", limit, workerId);
-
-        List<AttendanceEntity> entities = attendanceRepository
-                .findLatestByWorkerIdOrderByCreatedAtDesc(workerId);
-
-        List<AttendanceEntity> limitedEntities = entities.stream()
-                .limit(limit)
-                .collect(Collectors.toList());
-
-        return mapToResponseList(limitedEntities);
+        return mapToResponseList(attendanceRepository.findLatestByWorkerIdOrderByCreatedAtDesc(workerId).stream().limit(limit).collect(Collectors.toList()));
     }
+
+    // --- HELPERS ---
 
     private void calculateLateness(AttendanceEntity entity, SystemConfigurationEntity config) {
         LocalDateTime checkInTime = entity.getCheckInTime();
         LocalDate attendanceDate = entity.getAttendanceDate();
         LocalTime workStartTime = config.getWorkStartTime();
         LocalTime workEndTime = config.getWorkEndTime();
+        int toleranceMinutes = config.getLateThresholdMinutes() != null ? config.getLateThresholdMinutes() : 0;
 
-        int toleranceMinutes = config.getLateThresholdMinutes() != null ?
-                config.getLateThresholdMinutes() : 0;
-
-        // Determinar si es turno nocturno (cruza medianoche)
         boolean isNightShift = workStartTime.isAfter(workEndTime);
-
         LocalDateTime workStartDateTime;
 
         if (isNightShift) {
-            // TURNO NOCTURNO:
-            // Si check-in es después de medianoche (AM), el turno empezó ayer
-            LocalTime checkInOnlyTime = checkInTime.toLocalTime();
-
-            if (checkInOnlyTime.isBefore(workEndTime)) {
-                // Check-in en la mañana
-                // El turno empezó el día anterior
+            if (checkInTime.toLocalTime().isBefore(workEndTime)) {
                 workStartDateTime = attendanceDate.minusDays(1).atTime(workStartTime);
             } else {
-                // Check-in en la noche
-                // El turno empieza hoy
                 workStartDateTime = attendanceDate.atTime(workStartTime);
             }
         } else {
-            // TURNO DIURNO:
             workStartDateTime = attendanceDate.atTime(workStartTime);
         }
 
         LocalDateTime lateThresholdTime = workStartDateTime.plusMinutes(toleranceMinutes);
 
-        log.info("Lateness calculation: checkIn={}, workStart={}, threshold={}, isNightShift={}",
-                checkInTime.toLocalTime(),
-                workStartDateTime.toLocalTime(),
-                lateThresholdTime.toLocalTime(),
-                isNightShift);
-
         if (checkInTime.isAfter(lateThresholdTime)) {
             entity.setLate(true);
-            Duration lateness = Duration.between(workStartDateTime, checkInTime);
-            entity.setLatenessDuration(lateness);
-
-            log.warn("  → Worker is LATE by {} minutes (Tolerance: {} min)",
-                    lateness.toMinutes(), toleranceMinutes);
+            entity.setLatenessDuration(Duration.between(workStartDateTime, checkInTime));
         } else {
             entity.setLate(false);
             entity.setLatenessDuration(Duration.ZERO);
-
-            long minutesEarly = Duration.between(checkInTime, workStartDateTime).toMinutes();
-            log.info("  → Worker is ON TIME (arrived {} min early)", minutesEarly);
         }
     }
 
     private SystemConfigurationEntity getCurrentConfiguration() {
-        return configRepository.findLatestConfiguration()
-                .orElseThrow(() -> new BusinessException(
-                        "System configuration not found. Please configure the system first."
-                ));
+        return configRepository.findLatestConfiguration().orElseThrow(() -> new BusinessException("System configuration not found."));
     }
 
     private LocalDateTime getCurrentDateTime(SystemConfigurationEntity config) {
         if (config.isSimulationMode() && config.getSimulatedDateTime() != null) {
-            log.info("Using SIMULATED time: {}", config.getSimulatedDateTime());
             return config.getSimulatedDateTime();
         }
         return LocalDateTime.now();
     }
 
     private AttendanceResponse mapToResponse(AttendanceEntity entity, WorkerEntity worker) {
-        String workerFullName = (worker != null)
-                ? worker.getFirstName() + " " + worker.getLastName()
-                : "Trabajador Desconocido / Eliminado";
+        String workerFullName = "Desconocido";
+
+        // LÓGICA DE SNAPSHOT:
+        // 1. Si existe un objeto Worker vivo, usamos sus datos actuales.
+        if (worker != null) {
+            workerFullName = worker.getFirstName() + " " + worker.getLastName();
+        }
+        // 2. Si no (fue borrado), usamos el snapshot guardado en la entidad de asistencia.
+        else if (entity.getWorkerSnapshotName() != null) {
+            workerFullName = entity.getWorkerSnapshotName() + " (Eliminado)";
+        }
 
         return AttendanceResponse.builder()
                 .id(entity.getId())
-                .workerId(entity.getWorkerId())
+                .workerId(entity.getWorkerId()) // Será null si fue borrado
                 .workerFullName(workerFullName)
                 .rfidTag(entity.getRfidTag())
                 .attendanceDate(entity.getAttendanceDate())
@@ -332,29 +268,18 @@ public class AttendanceServiceImpl implements AttendanceService {
     private List<AttendanceResponse> mapToResponseList(List<AttendanceEntity> entities) {
         return entities.stream()
                 .map(entity -> {
-                    WorkerEntity worker = workerRepository.findById(entity.getWorkerId())
-                            .orElse(null);
+                    WorkerEntity worker = entity.getWorkerId() != null ? workerRepository.findById(entity.getWorkerId()).orElse(null) : null;
                     return mapToResponse(entity, worker);
                 })
                 .collect(Collectors.toList());
     }
 
     private String formatDuration(Duration duration) {
-        if (duration == null) {
-            return null;
-        }
-
+        if (duration == null) return null;
         long hours = duration.toHours();
         long minutes = duration.toMinutes() % 60;
         long seconds = duration.getSeconds() % 60;
-
-        if (hours == 0) {
-            if (minutes == 0) {
-                return String.format("%ds", seconds);
-            }
-            return String.format("%dm %ds", minutes, seconds);
-        }
-
+        if (hours == 0) return minutes == 0 ? String.format("%ds", seconds) : String.format("%dm %ds", minutes, seconds);
         return String.format("%dh %dm %ds", hours, minutes, seconds);
     }
 }

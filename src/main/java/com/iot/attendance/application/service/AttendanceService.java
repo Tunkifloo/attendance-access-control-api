@@ -16,6 +16,13 @@ public interface AttendanceService {
 
     List<AttendanceResponse> getAttendanceByDate(LocalDate date);
 
+    List<AttendanceResponse> getAttendanceHistory(
+            LocalDate startDate,
+            LocalDate endDate,
+            String status,
+            String sortDirection
+    );
+
     List<AttendanceResponse> getAttendanceByWorkerAndDateRange(
             Long workerId,
             LocalDate startDate,

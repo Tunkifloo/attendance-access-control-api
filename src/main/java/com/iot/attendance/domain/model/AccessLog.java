@@ -20,6 +20,8 @@ public class AccessLog {
 
     private String location;
 
+    private String status;
+
     private LocalDateTime accessTime;
 
     private LocalDateTime createdAt;

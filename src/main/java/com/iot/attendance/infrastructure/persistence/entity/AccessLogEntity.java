@@ -24,8 +24,11 @@ public class AccessLogEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "worker_id")
+    @Column(name = "worker_id", nullable = true)
     private Long workerId;
+
+    @Column(name = "worker_snapshot_name", length = 200)
+    private String workerSnapshotName;
 
     @Column(name = "fingerprint_id")
     private Integer fingerprintId;
@@ -35,6 +38,9 @@ public class AccessLogEntity {
 
     @Column(name = "location", length = 100)
     private String location;
+
+    @Column(name = "status", nullable = false, length = 50)
+    private String status;
 
     @Column(name = "access_time", nullable = false)
     private LocalDateTime accessTime;

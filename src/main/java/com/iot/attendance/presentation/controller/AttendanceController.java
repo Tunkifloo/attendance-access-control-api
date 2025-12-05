@@ -84,6 +84,28 @@ public class AttendanceController {
         return ResponseEntity.ok(ApiResponse.success(responses));
     }
 
+    @GetMapping("/history")
+    @Operation(summary = "Obtener historial de asistencias con filtros",
+            description = "Filtra por rango de fecha, estado (ALL, LATE, ON_TIME) y orden")
+    public ResponseEntity<ApiResponse<List<AttendanceResponse>>> getAttendanceHistory(
+            @Parameter(description = "Fecha inicio (yyyy-MM-dd)")
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @Parameter(description = "Fecha fin (yyyy-MM-dd)")
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @Parameter(description = "Filtro (ALL, LATE, ON_TIME)")
+            @RequestParam(defaultValue = "ALL") String status,
+            @Parameter(description = "Orden (ASC, DESC)")
+            @RequestParam(defaultValue = "DESC") String sort) {
+
+        List<AttendanceResponse> responses = attendanceService
+                .getAttendanceHistory(startDate, endDate, status, sort);
+
+        return ResponseEntity.ok(ApiResponse.success(
+                String.format("Found %d records", responses.size()),
+                responses
+        ));
+    }
+
     @GetMapping("/worker/{workerId}")
     @Operation(summary = "Obtener asistencias por trabajador y rango de fechas")
     public ResponseEntity<ApiResponse<List<AttendanceResponse>>> getAttendanceByWorkerAndRange(

@@ -1,6 +1,7 @@
 package com.iot.attendance.infrastructure.persistence.repository;
 
 import com.iot.attendance.infrastructure.persistence.entity.AccessLogEntity;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -14,15 +15,18 @@ public interface AccessLogRepository extends JpaRepository<AccessLogEntity, Long
 
     List<AccessLogEntity> findByWorkerIdOrderByAccessTimeDesc(Long workerId);
 
-    List<AccessLogEntity> findByAccessTimeBetween(LocalDateTime startTime, LocalDateTime endTime);
+    List<AccessLogEntity> findByAccessTimeBetween(
+            LocalDateTime startTime,
+            LocalDateTime endTime,
+            Sort sort
+    );
 
-    @Query("SELECT a FROM AccessLogEntity a WHERE a.workerId = :workerId " +
-            "AND a.accessTime BETWEEN :startTime AND :endTime " +
-            "ORDER BY a.accessTime DESC")
-    List<AccessLogEntity> findByWorkerIdAndTimeRange(
-            @Param("workerId") Long workerId,
-            @Param("startTime") LocalDateTime startTime,
-            @Param("endTime") LocalDateTime endTime
+    // Nuevo método para filtrar por estado y rango de tiempo con ordenamiento
+    List<AccessLogEntity> findByAccessTimeBetweenAndStatus(
+            LocalDateTime startTime,
+            LocalDateTime endTime,
+            String status,
+            Sort sort
     );
 
     @Query("SELECT a FROM AccessLogEntity a WHERE a.accessGranted = false " +

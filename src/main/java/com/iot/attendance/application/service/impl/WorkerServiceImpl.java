@@ -10,8 +10,12 @@ import com.iot.attendance.domain.enums.WorkerStatus;
 import com.iot.attendance.infrastructure.exception.ResourceAlreadyExistsException;
 import com.iot.attendance.infrastructure.exception.ResourceNotFoundException;
 import com.iot.attendance.infrastructure.firebase.FirebaseRealtimeService;
+import com.iot.attendance.infrastructure.persistence.entity.AccessLogEntity;
+import com.iot.attendance.infrastructure.persistence.entity.AttendanceEntity;
 import com.iot.attendance.infrastructure.persistence.entity.RfidCardEntity;
 import com.iot.attendance.infrastructure.persistence.entity.WorkerEntity;
+import com.iot.attendance.infrastructure.persistence.repository.AccessLogRepository;
+import com.iot.attendance.infrastructure.persistence.repository.AttendanceRepository;
 import com.iot.attendance.infrastructure.persistence.repository.RfidCardRepository;
 import com.iot.attendance.infrastructure.persistence.repository.WorkerRepository;
 import lombok.Getter;
@@ -34,6 +38,8 @@ public class WorkerServiceImpl implements WorkerService {
 
     private final WorkerRepository workerRepository;
     private final RfidCardRepository rfidCardRepository;
+    private final AttendanceRepository attendanceRepository;
+    private final AccessLogRepository accessLogRepository;
 
     @Getter
     private final WorkerMapper workerMapper;
@@ -47,18 +53,18 @@ public class WorkerServiceImpl implements WorkerService {
             throw new ResourceAlreadyExistsException("Documento ya existe: " + request.getDocumentNumber());
         }
 
-        // Activar Hardware y ESPERAR huella
+        // 1. Activar Hardware y ESPERAR huella (Bloqueante 40s)
         firebaseService.startRegistrationMode();
-
-        // Bloqueamos aquí hasta 40 segundos esperando al usuario
         Integer newFingerprintId = firebaseService.waitForNewFingerprintId(40);
+
         log.info("¡Huella capturada exitosamente! ID: {}", newFingerprintId);
 
         if (workerRepository.existsByFingerprintId(newFingerprintId)) {
             firebaseService.setAdminCommand("NADA");
             throw new ResourceAlreadyExistsException("La huella ID " + newFingerprintId + " ya pertenece a otro trabajador.");
         }
-        // Guardar Worker
+
+        // 2. Guardar Worker
         WorkerEntity entity = WorkerEntity.builder()
                 .firstName(request.getFirstName())
                 .lastName(request.getLastName())
@@ -73,7 +79,7 @@ public class WorkerServiceImpl implements WorkerService {
 
         WorkerEntity saved = workerRepository.save(entity);
 
-        // Resetear Hardware
+        // 3. Resetear Hardware
         firebaseService.setAdminCommand("NADA");
         firebaseService.setAdminState("LISTO");
 
@@ -83,7 +89,6 @@ public class WorkerServiceImpl implements WorkerService {
     @Override
     public WorkerResponse updateWorker(Long id, UpdateWorkerRequest request) {
         log.info("Updating worker with ID: {}", id);
-
         WorkerEntity entity = findWorkerEntityById(id);
 
         if (request.getFirstName() != null) entity.setFirstName(request.getFirstName());
@@ -92,19 +97,77 @@ public class WorkerServiceImpl implements WorkerService {
         if (request.getPhoneNumber() != null) entity.setPhoneNumber(request.getPhoneNumber());
         if (request.getHasRestrictedAreaAccess() != null) entity.setHasRestrictedAreaAccess(request.getHasRestrictedAreaAccess());
 
-        // No actualizamos tarjetas aquí, eso se hace via addRfidTag/removeRfidTag
-
         entity.setUpdatedAt(LocalDateTime.now());
-        WorkerEntity updated = workerRepository.save(entity);
+        return mapToResponse(workerRepository.save(entity));
+    }
 
-        return mapToResponse(updated);
+    @Override
+    public void deleteWorker(Long workerId) {
+        WorkerEntity worker = findWorkerEntityById(workerId);
+        String fullName = worker.getFirstName() + " " + worker.getLastName();
+
+        log.info("Iniciando proceso de borrado seguro para Worker ID: {}", workerId);
+
+        // 1. DESVINCULAR Y GUARDAR SNAPSHOT EN HISTORIAL (Preservar datos)
+
+        // A. Actualizar AccessLogs
+        List<AccessLogEntity> accessLogs = accessLogRepository.findByWorkerIdOrderByAccessTimeDesc(workerId);
+        for (AccessLogEntity logEntity : accessLogs) {
+            logEntity.setWorkerId(null); // Desvincular para evitar borrado en cascada (si hubiera) o referencia rota
+            if (logEntity.getWorkerSnapshotName() == null) {
+                logEntity.setWorkerSnapshotName(fullName); // Guardar nombre histórico
+            }
+        }
+        accessLogRepository.saveAll(accessLogs);
+        log.info("✓ {} logs de acceso desvinculados y preservados.", accessLogs.size());
+
+        // B. Actualizar Attendances
+        List<AttendanceEntity> attendances = attendanceRepository.findLatestByWorkerIdOrderByCreatedAtDesc(workerId);
+        for (AttendanceEntity att : attendances) {
+            att.setWorkerId(null); // Desvincular
+            if (att.getWorkerSnapshotName() == null) {
+                att.setWorkerSnapshotName(fullName); // Guardar nombre histórico
+            }
+        }
+        attendanceRepository.saveAll(attendances);
+        log.info("✓ {} registros de asistencia desvinculados y preservados.", attendances.size());
+
+        // 2. BORRAR HUELLA DEL HARDWARE
+        if (worker.getFingerprintId() != null) {
+            log.info(">> Enviando comando BORRAR huella ID {} al hardware", worker.getFingerprintId());
+            firebaseService.setTargetFingerprintId(worker.getFingerprintId());
+            firebaseService.setAdminCommand("BORRAR");
+            firebaseService.setAdminState("BORRANDO_USUARIO");
+
+            try {
+                firebaseService.waitForDeletionComplete(10);
+            } catch (Exception e) {
+                log.error("Error esperando confirmación hardware: {}", e.getMessage());
+                // Continuamos, la prioridad es limpiar la BD
+            }
+        }
+
+        // 3. LIBERAR TARJETAS RFID (Devolver al pool)
+        if (worker.getRfidCards() != null && !worker.getRfidCards().isEmpty()) {
+            List<RfidCardEntity> cardsToRelease = new ArrayList<>(worker.getRfidCards());
+            for (RfidCardEntity card : cardsToRelease) {
+                log.info(">> Devolviendo tarjeta {} al pool", card.getUid());
+                card.setWorker(null);
+                card.setUpdatedAt(LocalDateTime.now());
+                rfidCardRepository.save(card);
+            }
+            worker.getRfidCards().clear();
+        }
+
+        // 4. ELIMINAR TRABAJADOR DE BASE DE DATOS
+        workerRepository.delete(worker);
+        log.info("✓ Trabajador ID {} eliminado completamente de la tabla workers.", workerId);
     }
 
     @Override
     @Transactional(readOnly = true)
     public WorkerResponse getWorkerById(Long id) {
-        WorkerEntity entity = findWorkerEntityById(id);
-        return mapToResponse(entity);
+        return mapToResponse(findWorkerEntityById(id));
     }
 
     @Override
@@ -126,16 +189,13 @@ public class WorkerServiceImpl implements WorkerService {
     @Override
     @Transactional(readOnly = true)
     public WorkerResponse getWorkerByRfidTag(String rfidTag) {
-        // Buscamos primero la tarjeta y luego obtenemos el worker
         String normalizedTag = rfidTag.toUpperCase().replace(" ", "").trim();
-
         RfidCardEntity card = rfidCardRepository.findById(normalizedTag)
                 .orElseThrow(() -> new ResourceNotFoundException("RFID Tag not found: " + normalizedTag));
 
         if (card.getWorker() == null) {
             throw new ResourceNotFoundException("RFID Tag exists but is not assigned to any worker");
         }
-
         return mapToResponse(card.getWorker());
     }
 
@@ -165,59 +225,41 @@ public class WorkerServiceImpl implements WorkerService {
 
     @Override
     public WorkerResponse assignFingerprint(Long workerId, AssignFingerprintRequest request) {
-        // Este método podría ser redundante si usas el createWorker nuevo,
-        // pero lo mantenemos por si quieres actualizar huella manualmente.
-        log.info("Assigning fingerprint {} to worker {}", request.getFingerprintId(), workerId);
-
         if (workerRepository.existsByFingerprintId(request.getFingerprintId())) {
             throw new ResourceAlreadyExistsException("Fingerprint ID already in use");
         }
-
         WorkerEntity entity = findWorkerEntityById(workerId);
         entity.setFingerprintId(request.getFingerprintId());
         entity.setUpdatedAt(LocalDateTime.now());
-
         return mapToResponse(workerRepository.save(entity));
     }
 
     @Override
     public WorkerResponse addRfidTag(Long workerId, String rfidTag) {
         String normalizedTag = rfidTag.toUpperCase().replace(" ", "").trim();
-        log.info("Assigning RFID tag {} to worker {}", normalizedTag, workerId);
-
         WorkerEntity worker = findWorkerEntityById(workerId);
 
-        // Buscar la tarjeta en el pool (o crearla si no existe, aunque lo ideal es que venga del pool)
         RfidCardEntity card = rfidCardRepository.findById(normalizedTag)
                 .orElseGet(() -> RfidCardEntity.builder()
                         .uid(normalizedTag)
                         .lastSeen(LocalDateTime.now())
                         .build());
 
-        // Validar si ya pertenece a otro
         if (card.getWorker() != null && !card.getWorker().getId().equals(workerId)) {
             throw new ResourceAlreadyExistsException("RFID tag is already assigned to worker: " + card.getWorker().getId());
         }
 
-        // Asignar
         card.setWorker(worker);
         card.setUpdatedAt(LocalDateTime.now());
-
-        // Guardamos la tarjeta (la relación se actualiza por el lado propietario)
         rfidCardRepository.save(card);
-
-        // Agregamos manualmente la tarjeta a la lista del worker para que el Mapper la vea
         worker.getRfidCards().add(card);
 
-        // Refrescamos el worker para la respuesta
         return mapToResponse(worker);
     }
 
     @Override
     public WorkerResponse removeRfidTag(Long workerId, String rfidTag) {
         String normalizedTag = rfidTag.toUpperCase().replace(" ", "").trim();
-        log.info("Removing RFID tag {} from worker {}", normalizedTag, workerId);
-
         RfidCardEntity card = rfidCardRepository.findById(normalizedTag)
                 .orElseThrow(() -> new ResourceNotFoundException("RFID Tag not found"));
 
@@ -225,7 +267,6 @@ public class WorkerServiceImpl implements WorkerService {
             throw new ResourceNotFoundException("RFID Tag is not assigned to this worker");
         }
 
-        // Desvincular (Volverla huérfana al pool)
         card.setWorker(null);
         card.setUpdatedAt(LocalDateTime.now());
         rfidCardRepository.save(card);
@@ -262,44 +303,7 @@ public class WorkerServiceImpl implements WorkerService {
     }
 
     @Override
-    public void deleteWorker(Long workerId) {
-        WorkerEntity worker = findWorkerEntityById(workerId);
-
-        // Borrar huella del hardware
-        if (worker.getFingerprintId() != null) {
-            log.info(">> Enviando comando BORRAR huella ID {} al hardware", worker.getFingerprintId());
-
-            firebaseService.setTargetFingerprintId(worker.getFingerprintId());
-            firebaseService.setAdminCommand("BORRAR");
-            firebaseService.setAdminState("BORRANDO_USUARIO");
-
-            try {
-                firebaseService.waitForDeletionComplete(10);
-            } catch (Exception e) {
-                log.error("Error esperando confirmación: {}", e.getMessage());
-            }
-        }
-
-        // Liberar tarjetas RFID al pool
-        if (worker.getRfidCards() != null && !worker.getRfidCards().isEmpty()) {
-            List<RfidCardEntity> cardsToRelease = new ArrayList<>(worker.getRfidCards());
-            for (RfidCardEntity card : cardsToRelease) {
-                log.info(">> Devolviendo tarjeta {} al pool", card.getUid());
-                card.setWorker(null);
-                card.setUpdatedAt(LocalDateTime.now());
-                rfidCardRepository.save(card);
-            }
-            worker.getRfidCards().clear();
-        }
-
-        //  Eliminar de base de datos
-        workerRepository.delete(worker);
-        log.info("✓ Trabajador ID {} eliminado completamente", workerId);
-    }
-
-    @Override
     public List<WorkerResponse> bulkCreateWorkers(List<CreateWorkerRequest> requests) {
-        // Implementación simple sin bloqueo biométrico
         List<WorkerEntity> entities = requests.stream()
                 .map(req -> WorkerEntity.builder()
                         .firstName(req.getFirstName())
@@ -324,8 +328,6 @@ public class WorkerServiceImpl implements WorkerService {
     }
 
     private WorkerResponse mapToResponse(WorkerEntity entity) {
-        // Mapeo manual porque MapStruct puede fallar con la nueva estructura
-        // si no se actualizó el Mapper.
         return WorkerResponse.builder()
                 .id(entity.getId())
                 .firstName(entity.getFirstName())

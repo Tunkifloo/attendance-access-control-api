@@ -14,6 +14,7 @@ public class AccessLogMapper {
                 .fingerprintId(entity.getFingerprintId())
                 .accessGranted(entity.isAccessGranted())
                 .location(entity.getLocation())
+                .status(entity.getStatus())
                 .accessTime(entity.getAccessTime())
                 .createdAt(entity.getCreatedAt())
                 .build();
@@ -26,6 +27,7 @@ public class AccessLogMapper {
                 .fingerprintId(domain.getFingerprintId())
                 .accessGranted(domain.isAccessGranted())
                 .location(domain.getLocation())
+                .status(domain.getStatus())
                 .accessTime(domain.getAccessTime())
                 .createdAt(domain.getCreatedAt())
                 .build();
