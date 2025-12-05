@@ -21,6 +21,7 @@ public class AccessLogResponse {
     private boolean accessGranted;
     private String location;
     private String status;
+
     @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime accessTime;
 

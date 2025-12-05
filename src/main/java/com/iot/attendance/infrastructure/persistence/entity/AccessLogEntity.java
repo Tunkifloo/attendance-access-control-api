@@ -10,8 +10,7 @@ import java.time.LocalDateTime;
 @Table(name = "access_logs", indexes = {
         @Index(name = "idx_access_worker_time", columnList = "worker_id, access_time"),
         @Index(name = "idx_access_granted", columnList = "access_granted"),
-        @Index(name = "idx_access_fingerprint", columnList = "fingerprint_id"),
-        @Index(name = "idx_access_time", columnList = "access_time")
+        @Index(name = "idx_access_status", columnList = "status")
 })
 @Getter
 @Setter

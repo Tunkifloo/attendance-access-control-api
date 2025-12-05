@@ -25,31 +25,49 @@ public class SecurityController {
     private final SecurityService securityService;
 
     @GetMapping("/logs")
-    @Operation(summary = "Obtener logs de seguridad", description = "Filtra por rango de fecha y tipo (ACCESS, ATTENDANCE)")
+    @Operation(summary = "Obtener logs de seguridad por rango de tiempo")
     public ResponseEntity<ApiResponse<List<SecurityLogResponse>>> getSecurityLogs(
+            @Parameter(description = "Fecha/hora inicial")
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startTime,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endTime,
-            @Parameter(description = "Tipo (ACCESS, ATTENDANCE, ALL)")
-            @RequestParam(defaultValue = "ALL") String severity,
-            @Parameter(description = "Ordenamiento (ASC, DESC)")
-            @RequestParam(defaultValue = "DESC") String sort) {
+            @Parameter(description = "Fecha/hora final")
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endTime) {
 
         List<SecurityLogResponse> responses = securityService
-                .getSecurityLogsByTimeRange(startTime, endTime, severity, sort);
+                .getSecurityLogsByTimeRange(startTime, endTime);
 
-        return ResponseEntity.ok(ApiResponse.success(
-                String.format("Found %d security events", responses.size()),
-                responses
-        ));
+        return ResponseEntity.ok(ApiResponse.success(responses));
+    }
+
+    @GetMapping("/critical")
+    @Operation(summary = "Obtener eventos críticos de seguridad")
+    public ResponseEntity<ApiResponse<List<SecurityLogResponse>>> getCriticalEvents() {
+        List<SecurityLogResponse> responses = securityService.getCriticalEvents();
+        return ResponseEntity.ok(ApiResponse.success(responses));
+    }
+
+    @GetMapping("/events/{eventType}")
+    @Operation(summary = "Obtener eventos por tipo")
+    public ResponseEntity<ApiResponse<List<SecurityLogResponse>>> getEventsByType(
+            @Parameter(description = "Tipo de evento") @PathVariable String eventType,
+            @Parameter(description = "Número de horas hacia atrás")
+            @RequestParam(defaultValue = "24") int hours) {
+
+        List<SecurityLogResponse> responses = securityService
+                .getRecentEventsByType(eventType, hours);
+
+        return ResponseEntity.ok(ApiResponse.success(responses));
     }
 
     @PostMapping("/manual-log")
+    @Operation(summary = "Registrar evento de seguridad manual")
     public ResponseEntity<ApiResponse<Void>> logSecurityEvent(
             @RequestParam String eventType,
             @RequestParam String description,
-            @RequestParam(defaultValue = "ACCESS") String severity) {
+            @RequestParam(defaultValue = "MEDIUM") String severity) {
 
+        log.info("Manual security log: {} - {}", eventType, description);
         securityService.logSecurityEvent(eventType, description, severity);
-        return ResponseEntity.ok(ApiResponse.success("Security event logged", null));
+
+        return ResponseEntity.ok(ApiResponse.success("Security event logged successfully", null));
     }
 }

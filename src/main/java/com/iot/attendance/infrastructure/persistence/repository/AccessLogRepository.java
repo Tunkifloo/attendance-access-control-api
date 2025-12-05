@@ -21,7 +21,6 @@ public interface AccessLogRepository extends JpaRepository<AccessLogEntity, Long
             Sort sort
     );
 
-    // Nuevo método para filtrar por estado y rango de tiempo con ordenamiento
     List<AccessLogEntity> findByAccessTimeBetweenAndStatus(
             LocalDateTime startTime,
             LocalDateTime endTime,

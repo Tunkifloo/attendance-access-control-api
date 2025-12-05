@@ -20,8 +20,6 @@ public class SecurityLog {
 
     private Integer attemptCount;
 
-    private String severity;
-
     private LocalDateTime eventTime;
 
     private LocalDateTime createdAt;
